@@ -1,0 +1,59 @@
+/* === Agents Management === */
+
+.agents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-4);
+}
+
+.agent-card {
+  background: var(--white);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--primary);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.agent-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+
+.agent-card h4 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+  color: var(--text);
+}
+
+.agent-card p {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-3);
+  line-height: 1.6;
+}
+
+.agent-card .agent-meta {
+  display: flex;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  align-items: center;
+}
+
+.agent-card.status-active {
+  border-left-color: var(--success);
+}
+
+.agent-card.status-dev {
+  border-left-color: var(--warning);
+}
+
+.agent-card.status-planning {
+  border-left-color: var(--primary);
+}
+
+.agent-card.status-error {
+  border-left-color: var(--danger);
+}

@@ -1,0 +1,28 @@
+# -*- coding: utf-8 -*-
+"""Celery 配置"""
+from celery import Celery
+
+from config import settings
+
+celery_app = Celery(
+    "hujing-agent",
+    broker=settings.REDIS_URL,
+    backend=settings.REDIS_URL,
+)
+
+celery_app.conf.update(
+    task_serializer="json",
+    accept_content=["json"],
+    result_serializer="json",
+    timezone="Asia/Shanghai",
+    enable_utc=True,
+    task_track_started=True,
+    task_acks_late=True,
+    worker_prefetch_multiplier=1,
+    # 任务超时设置
+    task_time_limit=300,  # 单个任务最大执行时间（秒），超时会被强制终止
+    task_soft_time_limit=280,  # 单个任务软超时时间（秒），超时时发送信号
+)
+
+# 自动发现任务
+celery_app.autodiscover_tasks(["app.tasks"])

@@ -1,0 +1,12 @@
+/* === Table Pages === */
+
+.table-page-card .filter-bar {
+  background: transparent;
+}
+
+.table-empty {
+  text-align: center;
+  padding: var(--space-8) var(--space-6);
+  color: var(--text-muted);
+  font-size: var(--text-body);
+}

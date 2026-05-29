@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 — AI会话分析平台</title>
+  <link rel="stylesheet" href="/css/variables.css">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: var(--font);
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text);
+    }
+
+    .login-container {
+      width: 100%;
+      max-width: 420px;
+      padding: var(--space-6);
+    }
+
+    .login-card {
+      background: var(--white);
+      border-radius: var(--radius-lg);
+      padding: var(--space-8) var(--space-6);
+      box-shadow: var(--shadow-xl);
+    }
+
+    .login-header {
+      text-align: center;
+      margin-bottom: var(--space-6);
+    }
+
+    .login-header .logo {
+      width: 56px;
+      height: 56px;
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto var(--space-4);
+      color: var(--white);
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .login-header h1 {
+      font-size: var(--text-title);
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: var(--space-1);
+    }
+
+    .login-header p {
+      font-size: var(--text-sm);
+      color: var(--text-muted);
+    }
+
+    .login-form .form-group {
+      margin-bottom: var(--space-4);
+    }
+
+    .login-form label {
+      display: block;
+      font-size: var(--text-sm);
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: var(--space-2);
+    }
+
+    .login-form .input-wrapper {
+      position: relative;
+    }
+
+    .login-form input {
+      width: 100%;
+      padding: var(--space-3) var(--space-4);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      font-size: var(--text-body);
+      font-family: var(--font);
+      transition: border-color var(--transition), box-shadow var(--transition);
+      outline: none;
+      background: var(--bg);
+    }
+
+    .login-form input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px var(--primary-bg);
+    }
+
+    .login-form input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .login-btn {
+      width: 100%;
+      padding: var(--space-3) var(--space-4);
+      background: var(--primary);
+      color: var(--white);
+      border: none;
+      border-radius: var(--radius);
+      font-size: var(--text-body);
+      font-weight: 600;
+      font-family: var(--font);
+      cursor: pointer;
+      transition: background var(--transition), transform var(--transition-fast);
+      margin-top: var(--space-2);
+    }
+
+    .login-btn:hover {
+      background: var(--primary-hover);
+    }
+
+    .login-btn:active {
+      transform: scale(0.98);
+    }
+
+    .login-btn:disabled {
+      background: var(--border-strong);
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .login-error {
+      font-size: var(--text-sm);
+      color: var(--danger);
+      margin-top: var(--space-2);
+      display: none;
+    }
+
+    .login-error.show {
+      display: block;
+    }
+
+    .login-footer {
+      text-align: center;
+      margin-top: var(--space-6);
+      font-size: var(--text-xs);
+      color: rgba(255,255,255,0.4);
+    }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-card">
+      <div class="login-header">
+        <div class="logo">AI</div>
+        <h1>AI会话分析平台</h1>
+        <p>销售合规分析管理系统</p>
+      </div>
+
+      <form class="login-form" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label for="username">用户名</label>
+          <div class="input-wrapper">
+            <input type="text" id="username" name="username" placeholder="请输入用户名" autocomplete="username" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="password">密码</label>
+          <div class="input-wrapper">
+            <input type="password" id="password" name="password" placeholder="请输入密码" autocomplete="current-password" required>
+          </div>
+        </div>
+
+        <div id="login-error" class="login-error"></div>
+
+        <button type="submit" id="login-btn" class="login-btn">登 录</button>
+      </form>
+    </div>
+
+    <div class="login-footer">
+      AI会话分析平台 &copy; 2026
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin;
+
+    async function handleLogin(e) {
+      e.preventDefault();
+
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      const btn = document.getElementById('login-btn');
+      const errorEl = document.getElementById('login-error');
+
+      if (!username || !password) {
+        errorEl.textContent = '请填写用户名和密码';
+        errorEl.classList.add('show');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = '登录中...';
+      errorEl.classList.remove('show');
+
+      try {
+        const res = await fetch(API_BASE + '/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          errorEl.textContent = data.detail || '登录失败，请检查用户名和密码';
+          errorEl.classList.add('show');
+          return;
+        }
+
+        // 保存 token 和用户信息到 localStorage
+        localStorage.setItem('token', data.access_token);
+        localStorage.setItem('user', JSON.stringify({
+          user_id: data.user_id,
+          username: data.username,
+          role_names: data.role_names,
+          permissions: data.permissions,
+        }));
+
+        // 跳转到主页
+        window.location.href = '/';
+      } catch (err) {
+        errorEl.textContent = '网络错误，请检查网络连接';
+        errorEl.classList.add('show');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '登 录';
+      }
+    }
+
+    // 如果已登录，直接跳转
+    (function checkAuth() {
+      const token = localStorage.getItem('token');
+      if (token) {
+        window.location.href = '/';
+      }
+    })();
+  </script>
+</body>
+</html>

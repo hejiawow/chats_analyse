@@ -1,0 +1,29 @@
+# FastAPI
+fastapi==0.115.0
+uvicorn[standard]==0.31.1
+pydantic>=2.11.0
+pydantic-settings>=2.5.2
+# Celery
+celery==5.4.0
+redis==5.1.0
+
+# Database
+sqlalchemy==2.0.35
+asyncpg==0.30.0
+alembic==1.13.3
+
+# HTTP
+requests==2.32.3
+
+# Vector / RAG
+pgvector>=0.2.5
+
+# Auth
+passlib[bcrypt]>=1.7.4
+PyJWT>=2.8.0
+
+# AI
+openai>=1.52.0
+langchain>=1.0.0
+langchain-openai>=0.3.0
+langchain-core>=0.3.0

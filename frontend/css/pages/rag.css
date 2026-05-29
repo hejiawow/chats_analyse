@@ -1,0 +1,139 @@
+/* === RAG Chat === */
+
+.rag-chat-container {
+  min-height: 400px;
+  max-height: 500px;
+  overflow-y: auto;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-4);
+  background: var(--bg);
+}
+
+.rag-welcome {
+  text-align: center;
+  color: var(--text-muted);
+  padding: var(--space-8) var(--space-6);
+}
+
+.rag-welcome-title {
+  font-size: var(--text-body);
+  margin-bottom: var(--space-2);
+  color: var(--text-secondary);
+}
+
+.rag-welcome-hint {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.rag-message {
+  margin-bottom: var(--space-4);
+}
+
+.rag-message-user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.rag-message-user .rag-bubble {
+  background: var(--primary);
+  color: var(--white);
+  border-radius: var(--radius) var(--radius) var(--radius-sm) var(--radius);
+  padding: var(--space-3) var(--space-4);
+  max-width: 70%;
+  font-size: var(--text-body);
+  line-height: 1.6;
+}
+
+.rag-message-bot {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.rag-message-bot .rag-bubble {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) var(--radius) var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  max-width: 85%;
+  font-size: var(--text-body);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.rag-loading {
+  margin-bottom: var(--space-4);
+}
+
+.rag-loading-dots {
+  display: inline-flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+.rag-loading-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: spin 1s linear infinite;
+}
+
+.rag-loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.rag-loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+.rag-sources {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.rag-sources-label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.rag-source-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.rag-source-tag {
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  padding: 2px 10px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.rag-source-tag:hover {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+
+.rag-input-area {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-end;
+}
+
+.rag-input-area .form-group {
+  flex: 1;
+  margin: 0;
+}
+
+.rag-error {
+  background: var(--danger-bg);
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--danger);
+}
