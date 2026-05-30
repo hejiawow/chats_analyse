@@ -10,6 +10,7 @@ redis==5.1.0
 # Database
 sqlalchemy==2.0.35
 asyncpg==0.30.0
+psycopg2-binary==2.9.10
 alembic==1.13.3
 
 # HTTP
