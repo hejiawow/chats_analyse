@@ -108,12 +108,16 @@
     </a-table>
 
     <!-- 详情弹窗 -->
-    <a-modal v-model:open="detailVisible" title="质检详情" width="750px">
+    <a-modal v-model:open="detailVisible" title="质检详情" width="750px" okText="确定" cancelText="取消">
       <a-descriptions v-if="detailData" :column="1" bordered size="small" :label-style="{ width: '120px', minWidth: '120px' }">
         <a-descriptions-item label="销售ID">{{ detailData.user_id }}</a-descriptions-item>
         <a-descriptions-item label="销售姓名">{{ detailData.user_name || '-' }}</a-descriptions-item>
         <a-descriptions-item label="好友ID">{{ detailData.friend_id }}</a-descriptions-item>
         <a-descriptions-item label="好友姓名">{{ detailData.friend_name || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="好友备注">{{ detailData.chat_title || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="好友别名">{{ detailData.alias || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="绑定手机号">{{ detailData.phone || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="备注手机号">{{ detailData.remark_phone || '-' }}</a-descriptions-item>
         <a-descriptions-item label="检测时间">{{ detailData.check_time_start }} ~ {{ detailData.check_time_end }}</a-descriptions-item>
         <a-descriptions-item label="聊天记录数">{{ detailData.chat_record_count }}</a-descriptions-item>
         <a-descriptions-item label="检测关键词">{{ detailData.detected_keywords || '无' }}</a-descriptions-item>
@@ -122,6 +126,10 @@
             <div><strong>{{ m.keyword }}</strong> - {{ m.speaker }} - {{ m.time }}</div>
             <div style="color: #666">{{ m.message }}</div>
           </div>
+          <a-button type="link" size="small" @click="showChatRecords" style="margin-top: 8px">查看全部聊天记录</a-button>
+        </a-descriptions-item>
+        <a-descriptions-item v-else label="聊天记录">
+          <a-button type="link" size="small" @click="showChatRecords">查看全部聊天记录</a-button>
         </a-descriptions-item>
         <a-descriptions-item v-if="detailData.risk_level" label="风险等级">
           <a-tag :color="getRiskColor(detailData.risk_level)">{{ getRiskText(detailData.risk_level) }}</a-tag>
@@ -135,6 +143,42 @@
         </a-descriptions-item>
       </a-descriptions>
     </a-modal>
+
+    <!-- 聊天记录弹窗 -->
+    <a-modal v-model:open="chatRecordsVisible" title="全部聊天记录" width="800px" :footer="null" :closable="true">
+      <div v-if="chatRecordsLoading" style="text-align: center; padding: 40px">
+        <a-spin />
+      </div>
+      <div v-else-if="chatRecordsData.length === 0" style="text-align: center; padding: 40px; color: #999">
+        暂无聊天记录
+      </div>
+      <div v-else class="chat-records-list">
+        <div class="chat-records-header">
+          共 {{ chatRecordsTotal }} 条聊天记录
+          <span v-if="detailData" style="margin-left: 12px; color: #666">
+            时间范围：{{ detailData.check_time_start }} ~ {{ detailData.check_time_end }}
+          </span>
+        </div>
+        <div class="chat-records-content">
+          <div v-for="(msg, idx) in chatRecordsData" :key="idx" class="chat-message" :class="{ 'is-self': msg.author === 'right' }">
+            <div class="chat-message-time" v-if="shouldShowTime(idx)">
+              {{ formatChatTime(msg.createTime) }}
+            </div>
+            <div class="chat-message-row">
+              <div class="chat-avatar" :class="{ 'self-avatar': msg.author === 'right' }">
+                {{ msg.author === 'right' ? '销' : '客' }}
+              </div>
+              <div class="chat-bubble">
+                <div class="chat-bubble-content">{{ msg.sentence }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <a-button @click="chatRecordsVisible = false">关闭</a-button>
+      </template>
+    </a-modal>
   </div>
 </template>
 
@@ -142,7 +186,7 @@
 import { ref, reactive, onMounted, watch, nextTick } from 'vue'
 import { message } from 'ant-design-vue'
 import * as echarts from 'echarts'
-import { getQualityCheckList, getQualityCheckStats, exportQualityCheckResults, getActiveKeywords } from '@/api/qualitycheck'
+import { getQualityCheckList, getQualityCheckStats, exportQualityCheckResults, getActiveKeywords, getQualityCheckChatRecords } from '@/api/qualitycheck'
 
 // 关键词缓存配置
 const KEYWORDS_CACHE_KEY = 'qc_keywords_cache'
@@ -177,6 +221,10 @@ const columns = [
   { title: '时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
   { title: '销售', key: 'user_name', width: 140 },
   { title: '好友', key: 'friend_name', width: 140 },
+  { title: '好友备注', dataIndex: 'chat_title', key: 'chat_title', width: 120, ellipsis: true },
+  { title: '好友别名', dataIndex: 'alias', key: 'alias', width: 120, ellipsis: true },
+  { title: '绑定手机号', dataIndex: 'phone', key: 'phone', width: 120 },
+  { title: '备注手机号', dataIndex: 'remark_phone', key: 'remark_phone', width: 120 },
   { title: '风险等级', key: 'risk_level', width: 100 },
   { title: '检测关键词', key: 'detected_keywords', width: 150, ellipsis: true },
   { title: '风险描述', key: 'risk_description', ellipsis: true },
@@ -187,6 +235,12 @@ const columns = [
 // 详情
 const detailVisible = ref(false)
 const detailData = ref(null)
+
+// 聊天记录弹窗
+const chatRecordsVisible = ref(false)
+const chatRecordsLoading = ref(false)
+const chatRecordsData = ref([])
+const chatRecordsTotal = ref(0)
 
 // 风险等级映射
 function getRiskColor(level) {
@@ -199,10 +253,19 @@ function getRiskText(level) {
   return map[level] || '未知'
 }
 
-// 加载统计
+// 加载统计（响应筛选条件，但不包括风险等级）
 async function loadStats() {
   try {
-    stats.value = await getQualityCheckStats()
+    const params = {}
+    if (filters.user_id) params.user_id = filters.user_id
+    if (filters.friend_id) params.friend_id = filters.friend_id
+    if (filters.keyword) params.keyword = filters.keyword
+    if (filters.timeRange && filters.timeRange.length === 2) {
+      params.start_time = filters.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
+      params.end_time = filters.timeRange[1].format('YYYY-MM-DD HH:mm:ss')
+    }
+    // 注意：不传递 risk_level，统计不受风险等级筛选影响
+    stats.value = await getQualityCheckStats(params)
     if (collapseActiveKey.value.includes('charts')) {
       nextTick(() => renderCharts())
     }
@@ -353,6 +416,55 @@ function showDetail(record) {
   detailVisible.value = true
 }
 
+// 查看聊天记录
+async function showChatRecords() {
+  if (!detailData.value) return
+  chatRecordsVisible.value = true
+  chatRecordsLoading.value = true
+  chatRecordsData.value = []
+  try {
+    const res = await getQualityCheckChatRecords(detailData.value.id)
+    chatRecordsData.value = res.data || []
+    chatRecordsTotal.value = res.total || 0
+  } catch {
+    chatRecordsData.value = []
+    chatRecordsTotal.value = 0
+  } finally {
+    chatRecordsLoading.value = false
+  }
+}
+
+// 判断是否需要显示时间（相邻消息间隔超过5分钟显示时间）
+function shouldShowTime(idx) {
+  if (idx === 0) return true
+  const prevTime = chatRecordsData.value[idx - 1]?.createTime
+  const currTime = chatRecordsData.value[idx]?.createTime
+  if (!prevTime || !currTime) return false
+
+  const prevDate = new Date(prevTime)
+  const currDate = new Date(currTime)
+  const diffMinutes = (currDate - prevDate) / (1000 * 60)
+  return diffMinutes >= 5
+}
+
+// 格式化聊天时间
+function formatChatTime(time) {
+  if (!time) return ''
+  const date = new Date(time)
+  const today = new Date()
+  const isToday = date.toDateString() === today.toDateString()
+
+  const hours = date.getHours().toString().padStart(2, '0')
+  const minutes = date.getMinutes().toString().padStart(2, '0')
+
+  if (isToday) {
+    return `${hours}:${minutes}`
+  }
+  const month = (date.getMonth() + 1).toString().padStart(2, '0')
+  const day = date.getDate().toString().padStart(2, '0')
+  return `${month}-${day} ${hours}:${minutes}`
+}
+
 // 导出
 async function handleExport() {
   try {
@@ -457,5 +569,104 @@ onMounted(() => {
   background: #fff;
   border-radius: 8px;
   border: 1px solid #e2e8f0;
+}
+
+/* 聊天记录弹窗样式 - 微信风格 */
+.chat-records-list {
+  max-height: 500px;
+}
+
+.chat-records-header {
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 13px;
+  color: #334155;
+}
+
+.chat-records-content {
+  padding: 16px;
+  max-height: 420px;
+  overflow-y: auto;
+  background: #ededed;
+}
+
+.chat-message {
+  margin-bottom: 12px;
+}
+
+.chat-message-time {
+  text-align: center;
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 8px;
+}
+
+.chat-message-row {
+  display: flex;
+  align-items: flex-start;
+}
+
+.chat-message.is-self .chat-message-row {
+  flex-direction: row-reverse;
+}
+
+.chat-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  background: #e0e0e0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.chat-avatar.self-avatar {
+  background: #07c160;
+  color: #fff;
+}
+
+.chat-bubble {
+  max-width: 70%;
+  margin: 0 10px;
+  position: relative;
+}
+
+.chat-bubble-content {
+  padding: 10px 14px;
+  background: #fff;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #333;
+  line-height: 1.5;
+  word-break: break-word;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+}
+
+.chat-message.is-self .chat-bubble-content {
+  background: #95ec69;
+}
+
+/* 气泡小箭头 */
+.chat-bubble::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  width: 0;
+  height: 0;
+  border: 6px solid transparent;
+}
+
+.chat-message:not(.is-self) .chat-bubble::before {
+  left: -10px;
+  border-right-color: #fff;
+}
+
+.chat-message.is-self .chat-bubble::before {
+  right: -10px;
+  border-left-color: #95ec69;
 }
 </style>

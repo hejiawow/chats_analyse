@@ -43,6 +43,31 @@ def _get_friend_name(user_id: str, friend_id: int) -> str | None:
     return None
 
 
+def _get_friend_info(user_id: str, friend_id: int) -> dict:
+    """根据 user_id 和 friend_id 获取好友详细信息
+
+    Returns:
+        dict: 包含 friend_name, chat_title, alias, phone, remark_phone
+    """
+    friends_list = get_friends_list(user_id)
+    for f in friends_list:
+        if f.get("friendId") == friend_id:
+            return {
+                "friend_name": f.get("nick") or f.get("remark") or None,
+                "chat_title": f.get("remark") or None,
+                "alias": f.get("alias") or None,
+                "phone": f.get("phone") or None,
+                "remark_phone": f.get("remarkPhone") or None,
+            }
+    return {
+        "friend_name": None,
+        "chat_title": None,
+        "alias": None,
+        "phone": None,
+        "remark_phone": None,
+    }
+
+
 def update_batch_progress(batch_task_id: str, completed: int, total: int, status: str = "running", **extra):
     """更新批量任务进度"""
     data = {"completed": completed, "total": total, "status": status}
@@ -153,13 +178,17 @@ def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: in
         # 只有检测到关键词才保存到数据库
         if result.get("keyword_detected") == "yes":
             user_name = _get_user_name(user_id)
-            friend_name = _get_friend_name(user_id, friend_id)
+            friend_info = _get_friend_info(user_id, friend_id)
             with Session(sync_engine) as session:
                 record = QualityCheckResult(
                     user_id=user_id,
                     user_name=user_name,
                     friend_id=friend_id,
-                    friend_name=friend_name,
+                    friend_name=friend_info.get("friend_name"),
+                    chat_title=friend_info.get("chat_title"),
+                    alias=friend_info.get("alias"),
+                    phone=friend_info.get("phone"),
+                    remark_phone=friend_info.get("remark_phone"),
                     check_time_start=start_time,
                     check_time_end=end_time,
                     chat_record_count=result.get("chat_record_count", len(chat_records)),
@@ -332,13 +361,17 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
         # 只有检测到关键词才保存到数据库
         if result.get("keyword_detected") == "yes":
             user_name = _get_user_name(user_id)
-            friend_name = _get_friend_name(user_id, friend_id)
+            friend_info = _get_friend_info(user_id, friend_id)
             with Session(sync_engine) as session:
                 record = QualityCheckResult(
                     user_id=user_id,
                     user_name=user_name,
                     friend_id=friend_id,
-                    friend_name=friend_name,
+                    friend_name=friend_info.get("friend_name"),
+                    chat_title=friend_info.get("chat_title"),
+                    alias=friend_info.get("alias"),
+                    phone=friend_info.get("phone"),
+                    remark_phone=friend_info.get("remark_phone"),
                     check_time_start=start_time,
                     check_time_end=end_time,
                     chat_record_count=result.get("chat_record_count", len(chat_records)),

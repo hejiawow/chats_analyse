@@ -241,6 +241,10 @@ class QualityCheckResult(Base):
     friend_name = Column(String(128), nullable=True, comment="好友姓名")
     friend_wx_id = Column(String(64), nullable=True, comment="好友微信号")
     friend_nick = Column(String(128), nullable=True, comment="好友昵称")
+    chat_title = Column(String(256), nullable=True, comment="好友备注")
+    alias = Column(String(128), nullable=True, comment="好友别名")
+    phone = Column(String(32), nullable=True, comment="绑定手机号")
+    remark_phone = Column(String(32), nullable=True, comment="备注手机号")
 
     # === 时间范围 ===
     check_time_start = Column(String(32), nullable=True, comment="检测起始时间")
@@ -278,6 +282,10 @@ class QualityCheckResult(Base):
             "friend_name": self.friend_name,
             "friend_wx_id": self.friend_wx_id,
             "friend_nick": self.friend_nick,
+            "chat_title": self.chat_title,
+            "alias": self.alias,
+            "phone": self.phone,
+            "remark_phone": self.remark_phone,
             "check_time_start": self.check_time_start,
             "check_time_end": self.check_time_end,
             "chat_record_count": self.chat_record_count,
