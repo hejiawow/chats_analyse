@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """AI并发控制 - Redis分布式信号量"""
+import logging
 import time
 import uuid
 from typing import Optional
@@ -15,6 +16,8 @@ class AISemaphore:
     Uses Redis sorted sets for fair queuing with timestamps.
     Automatically cleans up expired entries to prevent slot leakage.
     """
+
+    _logger = logging.getLogger(__name__)
 
     SEMAPHORE_KEY = "ai:semaphore"
     SEMAPHORE_TTL = 300  # 5 minutes TTL for safety cleanup
@@ -77,20 +80,19 @@ class AISemaphore:
                 time.sleep(0.5)
 
             except Exception as e:
-                # Redis error - remove ourselves and fail open
                 try:
                     self.redis_client.zrem(semaphore_key, self.identifier)
                 except:
                     pass
-                print(f"AI Semaphore Redis error: {e}, allowing call")
-                return True
+                self._logger.error(f"AI Semaphore Redis error: {e}, rejecting call")
+                return False
 
     def release(self):
         """Release the semaphore slot"""
         try:
             self.redis_client.zrem(self.SEMAPHORE_KEY, self.identifier)
         except Exception as e:
-            print(f"AI Semaphore release error: {e}")
+            self._logger.error(f"AI Semaphore release error: {e}")
 
     def __enter__(self):
         """Context manager entry"""

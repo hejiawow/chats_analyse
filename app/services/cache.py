@@ -67,10 +67,15 @@ def cache_clear_pattern(pattern: str) -> int:
     client = get_redis()
     if client is None:
         return 0
+    deleted = 0
     try:
-        keys = client.keys(pattern)
-        if keys:
-            return client.delete(*keys)
+        cursor = 0
+        while True:
+            cursor, keys = client.scan(cursor, match=pattern, count=100)
+            if keys:
+                deleted += client.delete(*keys)
+            if cursor == 0:
+                break
     except Exception:
         pass
-    return 0
+    return deleted

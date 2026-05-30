@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """FastAPI 应用入口"""
+import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -29,6 +30,8 @@ from app.services.hujing_api import (
 from app.tasks.batch_quality import run_batch_quality_check, get_batch_progress, cancel_batch_task, run_batch_quality_check_by_messages
 from app.services.datasource.manager import DataSourceManager
 from app.services.dependencies import require_permission, require_auth, get_current_user
+
+logger = logging.getLogger(__name__)
 
 
 class TriggerRequest(BaseModel):
@@ -103,7 +106,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -180,7 +183,8 @@ async def trigger_analysis(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
+        logger.error(f"分析失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="分析失败，请稍后重试")
 
 
 @app.get("/api/datasources")
@@ -238,7 +242,8 @@ async def trigger_single_agent(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
+        logger.error(f"分析失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="分析失败，请稍后重试")
 
 
 @app.post("/api/trigger/sales-journey")
@@ -269,7 +274,8 @@ async def trigger_sales_journey(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
+        logger.error(f"分析失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="分析失败，请稍后重试")
 
 
 @app.post("/api/trigger/quality-check")
@@ -310,7 +316,8 @@ async def trigger_quality_check(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
+        logger.error(f"分析失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="分析失败，请稍后重试")
 
 
 class BatchQualityCheckRequest(BaseModel):

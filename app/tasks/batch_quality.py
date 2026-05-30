@@ -12,6 +12,7 @@ from app.models.database import sync_engine
 from app.models.result import QualityCheckResult
 from config import settings
 from app.api.quality_check_query import invalidate_quality_check_stats_cache
+from app.services.cache import cache_clear_pattern
 
 import redis
 redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -23,15 +24,11 @@ BATCH_CANCEL_KEY_PREFIX = "batch:cancel:"
 
 
 # === 姓名获取辅助函数 ===
-_sales_map_cache = None
 
 def _get_sales_map() -> dict:
-    """获取销售 ID -> 姓名映射（带缓存）"""
-    global _sales_map_cache
-    if _sales_map_cache is None:
-        sales_list = get_all_sales()
-        _sales_map_cache = {s.get("user_id"): s.get("username") for s in sales_list if s.get("user_id")}
-    return _sales_map_cache
+    """获取销售 ID -> 姓名映射（使用 Redis 缓存，6小时过期）"""
+    sales_list = get_all_sales()  # 已有 6 小时 Redis 缓存
+    return {s.get("user_id"): s.get("username") for s in sales_list if s.get("user_id")}
 
 def _get_user_name(user_id: str) -> str | None:
     """根据 user_id 获取销售姓名"""
@@ -235,6 +232,7 @@ def on_batch_complete(self, results, batch_task_id: str):
 
     # === 清除统计缓存 ===
     invalidate_quality_check_stats_cache()
+    cache_clear_pattern("quality_check:stats:user:*")
 
     return {
         "status": final_status,
