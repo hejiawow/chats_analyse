@@ -343,6 +343,10 @@ CREATE TABLE quality_check_results (
     friend_name VARCHAR(128),
     friend_wx_id VARCHAR(64),
     friend_nick VARCHAR(128),
+    chat_title VARCHAR(128),
+    alias VARCHAR(128),
+    phone VARCHAR(32),
+    remark_phone VARCHAR(32),
     check_time_start VARCHAR(32),
     check_time_end VARCHAR(32),
     chat_record_count INTEGER,
@@ -370,6 +374,10 @@ COMMENT ON TABLE quality_check_results IS '质检检测结果表';
 COMMENT ON COLUMN quality_check_results.keyword_detected IS 'yes/no 是否检测到关键词';
 COMMENT ON COLUMN quality_check_results.risk_level IS '风险等级：high/medium/low/none';
 COMMENT ON COLUMN quality_check_results.risk_category IS '风险类别：投诉/退款/退费/取消订单等';
+COMMENT ON COLUMN quality_check_results.chat_title IS '好友备注';
+COMMENT ON COLUMN quality_check_results.alias IS '好友别名';
+COMMENT ON COLUMN quality_check_results.phone IS '绑定手机号';
+COMMENT ON COLUMN quality_check_results.remark_phone IS '备注手机号';
 """,
     "case_script_library": """
 CREATE TABLE case_script_library (
