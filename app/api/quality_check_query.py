@@ -114,6 +114,7 @@ async def get_quality_check_stats(
     """获取质检结果统计：总数、风险分布、关键词频次（支持筛选）
 
     时间筛选：按检测时间范围（check_time_start/check_time_end）筛选
+    注意：风险等级筛选不影响统计，只影响表格
     """
     # 权限控制：非 admin 用户只能查看自己的数据
     user_id_filter = None
@@ -243,7 +244,7 @@ async def export_quality_check_results(
         if time_filter is not None:
             stmt = stmt.where(time_filter)
         stmt = stmt.order_by(QualityCheckResult.created_at.desc())
-        stmt = stmt.limit(limit)  # 添加限制
+        stmt = stmt.limit(limit)
 
         result = await session.execute(stmt)
         records = result.scalars().all()
@@ -310,6 +311,9 @@ async def get_quality_check_chat_records(
             if record.user_id != str(current_user["user_id"]):
                 return {"error": "无权查看此记录"}
 
+        # 打印调试信息
+        print(f"[DEBUG] get_chat_records params: user_id={record.user_id}, friend_id={record.friend_id}, start={record.check_time_start}, end={record.check_time_end}")
+
         # 获取聊天记录
         chat_records = get_chat_records(
             user_id=record.user_id,
@@ -317,6 +321,8 @@ async def get_quality_check_chat_records(
             start_time=record.check_time_start or "2000-01-01 00:00:00",
             end_time=record.check_time_end or "2099-12-31 23:59:59",
         )
+
+        print(f"[DEBUG] get_chat_records returned: {len(chat_records)} records")
 
         return {
             "total": len(chat_records),

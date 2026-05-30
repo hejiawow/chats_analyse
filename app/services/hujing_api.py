@@ -3,8 +3,12 @@
 import hashlib
 import time
 import requests
+import urllib3
 from datetime import datetime, timedelta
 from requests.exceptions import ConnectTimeout, ConnectionError, RequestException
+
+# 禁用 SSL 警告（内部 API 可能证书配置不完整）
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from config import settings
 from app.services.cache import cache_get, cache_set, cache_clear_pattern
@@ -38,12 +42,17 @@ def _request(url: str, form_data: dict, max_retries: int = 3, timeout: int = 30)
     headers = _build_headers()
     for retry in range(max_retries):
         try:
-            response = requests.post(url, headers=headers, data=form_data, timeout=timeout)
+            print(f"[DEBUG] _request: POST {url}, data={form_data}")
+            response = requests.post(url, headers=headers, data=form_data, timeout=timeout, verify=False)
             response.raise_for_status()
             result = response.json()
+            print(f"[DEBUG] _request response: code={result.get('code')}, msg={result.get('msg')}")
             if result.get("code") == 0:
                 return result.get("data", {})
-        except (ConnectTimeout, ConnectionError, RequestException):
+            else:
+                print(f"[DEBUG] _request: API returned non-zero code: {result}")
+        except (ConnectTimeout, ConnectionError, RequestException) as e:
+            print(f"[DEBUG] _request error (retry {retry}): {e}")
             if retry < max_retries - 1:
                 _time.sleep(2 ** retry)
     return None
@@ -54,6 +63,8 @@ def get_chat_records(user_id: str, friend_id: int, start_time: str = "2000-01-01
     """获取聊天记录（自动分页）"""
     all_chats = []
     base_url = f"{settings.HUJING_API_BASE_URL}/api/chat/showChatByUser"
+
+    print(f"[DEBUG] get_chat_records: user_id={user_id}, friend_id={friend_id}, start={start_time}, end={end_time}")
 
     for current_page in range(1, 51):
         data = _request(base_url, {
@@ -67,9 +78,11 @@ def get_chat_records(user_id: str, friend_id: int, start_time: str = "2000-01-01
         }, max_retries=1, timeout=30)
 
         if data is None:
+            print(f"[DEBUG] get_chat_records: page {current_page} returned None (API failed)")
             break
 
         chat_list = data.get("result", [])
+        print(f"[DEBUG] get_chat_records: page {current_page} returned {len(chat_list)} records")
         if not chat_list:
             break
 
@@ -378,7 +391,7 @@ def get_chat_pairs(start_time: str, end_time: str, page_size: int = 10000) -> di
     }
 
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=30)
+        response = requests.get(url, headers=headers, params=params, timeout=30, verify=False)
         response.raise_for_status()
         result = response.json()
         return {
@@ -449,7 +462,7 @@ def get_all_chat_messages(start_time: str, end_time: str, page_size: int = 10000
             }
 
             try:
-                response = requests.get(url, headers=headers, params=params, timeout=60)
+                response = requests.get(url, headers=headers, params=params, timeout=60, verify=False)
                 response.raise_for_status()
                 result = response.json()
                 

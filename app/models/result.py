@@ -241,9 +241,7 @@ class QualityCheckResult(Base):
     friend_name = Column(String(128), nullable=True, comment="好友姓名")
     friend_wx_id = Column(String(64), nullable=True, comment="好友微信号")
     friend_nick = Column(String(128), nullable=True, comment="好友昵称")
-
-    # === 好友详细信息 ===
-    chat_title = Column(String(128), nullable=True, comment="好友备注")
+    chat_title = Column(String(256), nullable=True, comment="好友备注")
     alias = Column(String(128), nullable=True, comment="好友别名")
     phone = Column(String(32), nullable=True, comment="绑定手机号")
     remark_phone = Column(String(32), nullable=True, comment="备注手机号")

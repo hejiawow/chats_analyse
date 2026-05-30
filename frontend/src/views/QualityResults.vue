@@ -128,6 +128,9 @@
           </div>
           <a-button type="link" size="small" @click="showChatRecords" style="margin-top: 8px">查看全部聊天记录</a-button>
         </a-descriptions-item>
+        <a-descriptions-item v-else label="聊天记录">
+          <a-button type="link" size="small" @click="showChatRecords">查看全部聊天记录</a-button>
+        </a-descriptions-item>
         <a-descriptions-item v-if="detailData.risk_level" label="风险等级">
           <a-tag :color="getRiskColor(detailData.risk_level)">{{ getRiskText(detailData.risk_level) }}</a-tag>
         </a-descriptions-item>
@@ -142,7 +145,7 @@
     </a-modal>
 
     <!-- 聊天记录弹窗 -->
-    <a-modal v-model:open="chatRecordsVisible" title="全部聊天记录" width="800px" okText="关闭" :cancelText="null" :closable="true">
+    <a-modal v-model:open="chatRecordsVisible" title="全部聊天记录" width="800px" :footer="null" :closable="true">
       <div v-if="chatRecordsLoading" style="text-align: center; padding: 40px">
         <a-spin />
       </div>
@@ -172,6 +175,9 @@
           </div>
         </div>
       </div>
+      <template #footer>
+        <a-button @click="chatRecordsVisible = false">关闭</a-button>
+      </template>
     </a-modal>
   </div>
 </template>

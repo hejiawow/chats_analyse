@@ -93,7 +93,7 @@
       <a-descriptions v-if="detailData" :column="1" bordered size="small">
         <a-descriptions-item label="销售ID">{{ detailData.user_id }}</a-descriptions-item>
         <a-descriptions-item label="好友ID">{{ detailData.friend_id }}</a-descriptions-item>
-        <a-descriptions-item label="好友姓名">{{ detailData.friend_name || detailData.friend_nick || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="好友昵称">{{ detailData.friend_nick || '-' }}</a-descriptions-item>
         <a-descriptions-item label="好友备注">{{ detailData.chat_title || '-' }}</a-descriptions-item>
         <a-descriptions-item label="好友别名">{{ detailData.alias || '-' }}</a-descriptions-item>
         <a-descriptions-item label="绑定手机号">{{ detailData.phone || '-' }}</a-descriptions-item>
@@ -113,6 +113,9 @@
           </div>
           <a-button type="link" size="small" @click="showChatRecords" style="margin-top: 8px">查看全部聊天记录</a-button>
         </a-descriptions-item>
+        <a-descriptions-item v-else label="聊天记录">
+          <a-button type="link" size="small" @click="showChatRecords">查看全部聊天记录</a-button>
+        </a-descriptions-item>
         <a-descriptions-item v-if="detailData.risk_level" label="风险等级">
           <span :class="['qc-risk-badge', detailData.risk_level]">{{ getRiskLevelText(detailData.risk_level) }}</span>
         </a-descriptions-item>
@@ -126,19 +129,8 @@
       </a-descriptions>
     </a-modal>
 
-    <!-- Batch errors modal -->
-    <a-modal v-model:open="batchErrorsVisible" title="批量质检失败详情" width="600px" okText="确定" cancelText="取消">
-      <a-table
-        :columns="batchErrorColumns"
-        :data-source="batchErrors"
-        :pagination="false"
-        size="small"
-        row-key="friend_id"
-      />
-    </a-modal>
-
     <!-- 聊天记录弹窗 -->
-    <a-modal v-model:open="chatRecordsVisible" title="全部聊天记录" width="800px" okText="关闭" :cancelText="null" :closable="true">
+    <a-modal v-model:open="chatRecordsVisible" title="全部聊天记录" width="800px" :footer="null" :closable="true">
       <div v-if="chatRecordsLoading" style="text-align: center; padding: 40px">
         <a-spin />
       </div>
@@ -168,6 +160,23 @@
           </div>
         </div>
       </div>
+      <template #footer>
+        <a-button @click="chatRecordsVisible = false">关闭</a-button>
+      </template>
+    </a-modal>
+
+    <!-- Batch errors modal -->
+    <a-modal v-model:open="batchErrorsVisible" title="批量质检失败详情" width="600px" okText="关闭" :footer="null">
+      <a-table
+        :columns="batchErrorColumns"
+        :data-source="batchErrors"
+        :pagination="false"
+        size="small"
+        row-key="friend_id"
+      />
+      <template #footer>
+        <a-button @click="batchErrorsVisible = false">关闭</a-button>
+      </template>
     </a-modal>
   </div>
 </template>

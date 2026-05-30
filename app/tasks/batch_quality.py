@@ -45,8 +45,13 @@ def _get_friend_name(user_id: str, friend_id: int) -> str | None:
             return f.get("nick") or f.get("remark") or None
     return None
 
+
 def _get_friend_info(user_id: str, friend_id: int) -> dict:
-    """根据 user_id 和 friend_id 获取好友详细信息"""
+    """根据 user_id 和 friend_id 获取好友详细信息
+
+    Returns:
+        dict: 包含 friend_name, chat_title, alias, phone, remark_phone
+    """
     friends_list = get_friends_list(user_id)
     for f in friends_list:
         if f.get("friendId") == friend_id:
@@ -55,7 +60,7 @@ def _get_friend_info(user_id: str, friend_id: int) -> dict:
                 "chat_title": f.get("remark") or None,
                 "alias": f.get("alias") or None,
                 "phone": f.get("phone") or None,
-                "remark_phone": f.get("remark_phone") or None,
+                "remark_phone": f.get("remarkPhone") or None,
             }
     return {
         "friend_name": None,

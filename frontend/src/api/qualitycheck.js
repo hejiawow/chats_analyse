@@ -64,13 +64,17 @@ export const cancelBatchQualityCheck = (taskId) =>
 export const triggerBatchQualityCheckByMessages = (data) =>
   request.post('/api/trigger/batch-quality-check-by-messages', data)
 
-// 获取质检统计数据
+// 获取质检统计数据（支持筛选参数，但风险等级筛选不影响统计）
 export const getQualityCheckStats = (params) =>
   request.get('/api/quality-check/stats', { params })
 
 // 导出质检结果 CSV
 export const exportQualityCheckResults = (params) =>
   request.get('/api/quality-check/export', { params, responseType: 'blob' })
+
+// 获取质检结果对应的聊天记录
+export const getQualityCheckChatRecords = (resultId) =>
+  request.get(`/api/quality-check/${resultId}/chat-records`)
 
 // 获取销售列表
 export const getSalesList = () =>
@@ -87,7 +91,3 @@ export const getActiveKeywords = () =>
 // 批量获取好友列表
 export const getFriendsBatch = (user_ids) =>
   request.post('/api/friends/batch', { user_ids })
-
-// 获取质检结果对应的聊天记录
-export const getQualityCheckChatRecords = (resultId) =>
-  request.get(`/api/quality-check/${resultId}/chat-records`)
