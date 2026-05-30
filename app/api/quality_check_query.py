@@ -96,7 +96,7 @@ async def query_quality_check_results(
 
         return {
             "total": total,
-            "page": page_size,
+            "page": page,
             "page_size": page_size,
             "data": [r.to_dict() for r in records],
         }

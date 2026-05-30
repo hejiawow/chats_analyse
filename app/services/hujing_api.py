@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """虎鲸 API 服务封装"""
 import hashlib
+import logging
 import time
 import requests
 import urllib3
@@ -17,6 +18,8 @@ from app.services.cache import cache_get, cache_set, cache_clear_pattern
 _SALES_CACHE_TTL = 21600       # 销售列表：6 小时
 _FRIENDS_CACHE_TTL = 21600     # 好友列表：6 小时
 _DEPARTMENT_CACHE_TTL = 3600   # 组织架构：1 小时
+
+logger = logging.getLogger(__name__)
 
 
 def generate_sign() -> tuple[str, int]:
@@ -222,7 +225,14 @@ def get_friends_list(user_id: str, is_group: str = "0", skip_deleted: bool = Tru
             seen_ids.add(fid)
             unique_friends.append(f)
 
-    sorted_friends = sorted(unique_friends, key=lambda x: datetime.strptime(x.get("createTime", ""), "%Y-%m-%d %H:%M:%S"))
+    def _safe_parse_time(t: str) -> datetime:
+        """安全解析时间字符串，异常时返回最小值"""
+        try:
+            return datetime.strptime(t, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            return datetime.min
+
+    sorted_friends = sorted(unique_friends, key=lambda x: _safe_parse_time(x.get("createTime", "")))
     # 缓存原始数据（不缓存 skip_deleted 过滤结果）
     cache_set(cache_key, sorted_friends, _FRIENDS_CACHE_TTL)
     if skip_deleted:
@@ -399,7 +409,7 @@ def get_chat_pairs(start_time: str, end_time: str, page_size: int = 10000) -> di
             "data": result.get("data", []),
         }
     except RequestException as e:
-        print(f"get_chat_pairs error: {e}")
+        logger.error(f"get_chat_pairs error: {e}")
         return {"total": 0, "data": [], "error": str(e)}
 
 
@@ -416,9 +426,9 @@ def get_all_chat_messages(start_time: str, end_time: str, page_size: int = 10000
     Returns:
         聊天记录列表，每条记录包含 user_id, friend_id, sentence 等字段
     """
-    url = "http://192.168.20.217:8006/api/v1/chat/messages"
+    url = f"{settings.HUJING_CHAT_API_URL}/api/v1/chat/messages"
     headers = {
-        "x-api-key": "sgiwogSDF450AXVCSFF",
+        "x-api-key": settings.HUJING_CHAT_API_KEY,
     }
     
     all_messages = []
@@ -437,18 +447,13 @@ def get_all_chat_messages(start_time: str, end_time: str, page_size: int = 10000
     # 强制分段，不依赖时间差判断
     segments = []
     current_start = start_dt
-    
-    print(f"DEBUG: get_all_chat_messages called with start={start_time}, end={end_time}, duration={total_duration}")
-    
+
     while current_start < end_dt:
         current_end = min(current_start + max_duration, end_dt)
         seg_start_str = current_start.strftime("%Y-%m-%d %H:%M:%S")
         seg_end_str = current_end.strftime("%Y-%m-%d %H:%M:%S")
         segments.append((seg_start_str, seg_end_str))
-        print(f"DEBUG: Created segment: {seg_start_str} - {seg_end_str}")
         current_start = current_end
-    
-    print(f"DEBUG: Total segments: {len(segments)}")
     
     # 遍历每个时间段进行请求
     for seg_start, seg_end in segments:
@@ -481,10 +486,10 @@ def get_all_chat_messages(start_time: str, end_time: str, page_size: int = 10000
             except RequestException as e:
                 try:
                     response_text = response.text if 'response' in locals() else 'N/A'
-                    print(f"get_all_chat_messages error: {e}")
-                    print(f"Response content: {response_text[:500]}")
+                    logger.error(f"get_all_chat_messages error: {e}")
+                    logger.debug(f"Response content: {response_text[:500]}")
                 except:
-                    print(f"get_all_chat_messages error: {e}")
+                    logger.error(f"get_all_chat_messages error: {e}")
                 break
 
     return all_messages

@@ -102,6 +102,7 @@ temp/
 *.bak
 
 # AI tool state
+.agents
 .claude/
 .sc/
 .codegraph/
