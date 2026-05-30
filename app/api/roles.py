@@ -2,7 +2,7 @@
 """角色管理 API — 增删改查"""
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.database import async_session
 from app.models.auth import Role, UserRole
 from app.services.dependencies import require_permission
+from app.services.audit_service import audit_service
 
 router = APIRouter()
 
@@ -78,9 +79,11 @@ async def get_role(
 @router.post("/roles", status_code=201)
 async def create_role(
     req: CreateRoleRequest,
+    request: Request,
     current_user: dict = Depends(require_permission("admin:role")),
 ):
     """创建角色"""
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     async with async_session() as db:
         existing = await db.execute(select(Role).where(Role.name == req.name))
         if existing.scalar_one_or_none():
@@ -96,6 +99,16 @@ async def create_role(
         await db.commit()
         await db.refresh(role)
 
+        # 记录审计日志
+        await audit_service.log_create_role(
+            operator_id=current_user["user_id"],
+            operator_name=current_user["username"],
+            role_id=role.id,
+            role_name=role.name,
+            permissions=req.permissions,
+            ip_address=ip_address,
+        )
+
         return {"id": role.id, "name": role.name}
 
 
@@ -103,35 +116,66 @@ async def create_role(
 async def update_role(
     role_id: int,
     req: UpdateRoleRequest,
+    request: Request,
     current_user: dict = Depends(require_permission("admin:role")),
 ):
     """更新角色"""
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     async with async_session() as db:
         result = await db.execute(select(Role).where(Role.id == role_id))
         role = result.scalar_one_or_none()
         if not role:
             raise HTTPException(status_code=404, detail="角色不存在")
 
+        # 记录变更
+        changes = {}
         if req.description is not None:
+            changes["description"] = {"old": role.description, "new": req.description}
             role.description = req.description
         if req.permissions is not None:
+            changes["permissions"] = {"old": role.permissions or [], "new": req.permissions}
             role.permissions = req.permissions
 
         await db.commit()
+
+        # 记录审计日志
+        if changes:
+            await audit_service.log_update_role(
+                operator_id=current_user["user_id"],
+                operator_name=current_user["username"],
+                role_id=role_id,
+                role_name=role.name,
+                changes=changes,
+                ip_address=ip_address,
+            )
+
         return {"id": role.id, "name": role.name}
 
 
 @router.delete("/roles/{role_id}")
 async def delete_role(
     role_id: int,
+    request: Request,
     current_user: dict = Depends(require_permission("admin:role")),
 ):
     """删除角色"""
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     async with async_session() as db:
         result = await db.execute(select(Role).where(Role.id == role_id))
         role = result.scalar_one_or_none()
         if not role:
             raise HTTPException(status_code=404, detail="角色不存在")
+
+        role_name = role.name
+
+        # 记录审计日志（删除前）
+        await audit_service.log_delete_role(
+            operator_id=current_user["user_id"],
+            operator_name=current_user["username"],
+            role_id=role_id,
+            role_name=role_name,
+            ip_address=ip_address,
+        )
 
         # Delete user-role bindings
         await db.execute(UserRole.__table__.delete().where(UserRole.role_id == role_id))

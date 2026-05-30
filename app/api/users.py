@@ -2,7 +2,7 @@
 """用户管理 API — 增删改查、角色分配"""
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,7 @@ from app.models.database import async_session
 from app.models.auth import User, Role, UserRole
 from app.services.auth import hash_password
 from app.services.dependencies import require_permission
+from app.services.audit_service import audit_service
 
 router = APIRouter()
 
@@ -112,9 +113,11 @@ async def get_user(
 @router.post("/users", status_code=201)
 async def create_user(
     req: CreateUserRequest,
+    request: Request,
     current_user: dict = Depends(require_permission("admin:user")),
 ):
     """创建用户"""
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     async with async_session() as db:
         # Check uniqueness
         existing = await db.execute(select(User).where(User.username == req.username))
@@ -133,6 +136,15 @@ async def create_user(
         await db.commit()
         await db.refresh(user)
 
+        # 记录审计日志
+        await audit_service.log_create_user(
+            operator_id=current_user["user_id"],
+            operator_name=current_user["username"],
+            created_user_id=user.id,
+            created_username=user.username,
+            ip_address=ip_address,
+        )
+
         return {"id": user.id, "username": user.username, "status": user.status}
 
 
@@ -140,37 +152,68 @@ async def create_user(
 async def update_user(
     user_id: int,
     req: UpdateUserRequest,
+    request: Request,
     current_user: dict = Depends(require_permission("admin:user")),
 ):
     """更新用户信息"""
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     async with async_session() as db:
         result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
         if not user:
             raise HTTPException(status_code=404, detail="用户不存在")
 
+        # 记录变更
+        changes = {}
         if req.email is not None:
+            changes["email"] = {"old": user.email, "new": req.email}
             user.email = req.email
         if req.phone is not None:
+            changes["phone"] = {"old": user.phone, "new": req.phone}
             user.phone = req.phone
         if req.status is not None:
+            changes["status"] = {"old": user.status, "new": req.status}
             user.status = req.status
 
         await db.commit()
+
+        # 记录审计日志
+        if changes:
+            await audit_service.log_update_user(
+                operator_id=current_user["user_id"],
+                operator_name=current_user["username"],
+                target_user_id=user_id,
+                changes=changes,
+                ip_address=ip_address,
+            )
+
         return {"id": user.id, "username": user.username, "status": user.status}
 
 
 @router.delete("/users/{user_id}")
 async def delete_user(
     user_id: int,
+    request: Request,
     current_user: dict = Depends(require_permission("admin:user")),
 ):
     """删除用户"""
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     async with async_session() as db:
         result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
         if not user:
             raise HTTPException(status_code=404, detail="用户不存在")
+
+        deleted_username = user.username
+
+        # 记录审计日志（删除前）
+        await audit_service.log_delete_user(
+            operator_id=current_user["user_id"],
+            operator_name=current_user["username"],
+            deleted_user_id=user_id,
+            deleted_username=deleted_username,
+            ip_address=ip_address,
+        )
 
         # Delete role bindings first
         await db.execute(UserRole.__table__.delete().where(UserRole.user_id == user_id))
@@ -183,9 +226,11 @@ async def delete_user(
 async def assign_user_roles(
     user_id: int,
     req: AssignRolesRequest,
+    request: Request,
     current_user: dict = Depends(require_permission("admin:user")),
 ):
     """分配用户角色（替换式）"""
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     async with async_session() as db:
         # Check user exists
         result = await db.execute(select(User).where(User.id == user_id))
@@ -203,5 +248,14 @@ async def assign_user_roles(
         for role_id in req.role_ids:
             db.add(UserRole(user_id=user_id, role_id=role_id))
         await db.commit()
+
+        # 记录审计日志
+        await audit_service.log_assign_roles(
+            operator_id=current_user["user_id"],
+            operator_name=current_user["username"],
+            target_user_id=user_id,
+            role_ids=req.role_ids,
+            ip_address=ip_address,
+        )
 
         return {"status": "ok", "role_ids": req.role_ids}

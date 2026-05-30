@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 """风险关键词配置管理 API"""
 from datetime import datetime
-from fastapi import APIRouter, Query, Depends, HTTPException, Body
+from fastapi import APIRouter, Query, Depends, HTTPException, Body, Request
 from sqlalchemy import select, func, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import async_session
 from app.models.result import RiskKeyword
 from app.services.dependencies import require_permission, get_current_user
+from app.services.audit_service import audit_service
 
 router = APIRouter()
 
@@ -79,12 +80,14 @@ async def list_keywords(
 
 @router.post("/keywords")
 async def add_keyword(
+    request: Request,
     keyword: str = Body(..., embed=True),
     category: str = Body(..., embed=True),
     severity: str = Body("medium", embed=True),
     current_user: dict = Depends(require_permission("admin:all")),
 ):
     """添加关键词（需要管理员权限）"""
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     async with async_session() as session:
         # 检查是否已存在
         stmt = select(RiskKeyword).where(RiskKeyword.keyword == keyword)
@@ -104,6 +107,18 @@ async def add_keyword(
         )
         session.add(new_kw)
         await session.commit()
+        await session.refresh(new_kw)
+
+        # 记录审计日志
+        await audit_service.log_keyword_change(
+            operator_id=current_user["user_id"],
+            operator_name=current_user["username"],
+            action="create",
+            keyword_id=new_kw.id,
+            keyword=keyword,
+            changes={"category": category, "severity": severity},
+            ip_address=ip_address,
+        )
 
         return {"status": "success", "keyword": new_kw.to_dict()}
 
@@ -111,6 +126,7 @@ async def add_keyword(
 @router.put("/keywords/{keyword_id}")
 async def update_keyword(
     keyword_id: int,
+    request: Request,
     keyword: str | None = Body(None, embed=True),
     category: str | None = Body(None, embed=True),
     severity: str | None = Body(None, embed=True),
@@ -118,6 +134,7 @@ async def update_keyword(
     current_user: dict = Depends(require_permission("admin:all")),
 ):
     """更新关键词（需要管理员权限）"""
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     async with async_session() as session:
         stmt = select(RiskKeyword).where(RiskKeyword.id == keyword_id)
         result = await session.execute(stmt)
@@ -126,26 +143,47 @@ async def update_keyword(
         if not record:
             raise HTTPException(status_code=404, detail="关键词不存在")
 
+        # 记录变更
+        changes = {}
         if keyword is not None:
+            changes["keyword"] = {"old": record.keyword, "new": keyword}
             record.keyword = keyword
         if category is not None:
+            changes["category"] = {"old": record.category, "new": category}
             record.category = category
         if severity is not None:
+            changes["severity"] = {"old": record.severity, "new": severity}
             record.severity = severity
         if is_active is not None:
+            changes["is_active"] = {"old": record.is_active, "new": is_active}
             record.is_active = is_active
         record.updated_at = datetime.now()
 
         await session.commit()
+
+        # 记录审计日志
+        if changes:
+            await audit_service.log_keyword_change(
+                operator_id=current_user["user_id"],
+                operator_name=current_user["username"],
+                action="update",
+                keyword_id=keyword_id,
+                keyword=record.keyword,
+                changes=changes,
+                ip_address=ip_address,
+            )
+
         return {"status": "success", "keyword": record.to_dict()}
 
 
 @router.delete("/keywords/{keyword_id}")
 async def delete_keyword(
     keyword_id: int,
+    request: Request,
     current_user: dict = Depends(require_permission("admin:all")),
 ):
     """删除关键词（需要管理员权限）"""
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     async with async_session() as session:
         stmt = select(RiskKeyword).where(RiskKeyword.id == keyword_id)
         result = await session.execute(stmt)
@@ -153,6 +191,18 @@ async def delete_keyword(
 
         if not record:
             raise HTTPException(status_code=404, detail="关键词不存在")
+
+        keyword_text = record.keyword
+
+        # 记录审计日志（删除前）
+        await audit_service.log_keyword_change(
+            operator_id=current_user["user_id"],
+            operator_name=current_user["username"],
+            action="delete",
+            keyword_id=keyword_id,
+            keyword=keyword_text,
+            ip_address=ip_address,
+        )
 
         await session.delete(record)
         await session.commit()

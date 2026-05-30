@@ -343,7 +343,7 @@ CREATE TABLE quality_check_results (
     friend_name VARCHAR(128),
     friend_wx_id VARCHAR(64),
     friend_nick VARCHAR(128),
-    chat_title VARCHAR(256),
+    chat_title VARCHAR(256),    
     alias VARCHAR(128),
     phone VARCHAR(32),
     remark_phone VARCHAR(32),

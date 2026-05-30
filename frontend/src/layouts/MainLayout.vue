@@ -59,6 +59,7 @@ import {
   RobotOutlined,
   UserOutlined,
   TeamOutlined,
+  AuditOutlined,
 } from '@ant-design/icons-vue'
 
 const router = useRouter()
@@ -83,6 +84,7 @@ const allMenuItems = [
   { key: 'divider-admin', label: '---', icon: null, permission: null, isDivider: true },
   { key: 'Users', label: '用户管理', icon: UserOutlined, permission: 'admin:user' },
   { key: 'Roles', label: '角色管理', icon: TeamOutlined, permission: 'admin:role' },
+  { key: 'Logs', label: '日志管理', icon: AuditOutlined, permission: 'admin:logs' },
 ]
 
 const visibleMenuItems = computed(() => {
