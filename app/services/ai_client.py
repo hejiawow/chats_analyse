@@ -15,7 +15,7 @@ def get_llm(model: str = None) -> ChatOpenAI:
     return ChatOpenAI(
         model=model or settings.AI_MODEL,
         api_key=settings.DASHSCOPE_API_KEY,
-        base_url="https://coding.dashscope.aliyuncs.com/v1",
+        base_url=settings.AI_API_URL,
         temperature=0.1,
         timeout=300,
         max_retries=0,  # 禁用内置重试，由信号量控制并发

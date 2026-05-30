@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # AI (DashScope)
     DASHSCOPE_API_KEY: str = ""
     AI_MODEL: str = "qwen-plus"
-    AI_API_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+    AI_API_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
     # AI Concurrency Control (分布式信号量限制并发调用)
     AI_MAX_CONCURRENT: int = 2  # 最大并发 AI 调用数（免费版 DashScope 只允许 1）
