@@ -3,31 +3,36 @@ version: "3.8"
 services:
   redis:
     image: redis:7-alpine
+    # 生产环境启用密码和 AOF 持久化（密码通过 REDIS_PASSWORD 环境变量传入）
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6370:6379"
     volumes:
-      - redis_data:/data
+      - /data/redis:/data
+    restart: always
 
   postgres:
     image: pgvector/pgvector:pg16
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5430:5432"
     environment:
       POSTGRES_DB: hujing_agent
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-postgres}
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - /data/pg_data:/var/lib/postgresql/data
+    restart: always
 
   api:
     build: .
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8010:8000"
     env_file: .env
     depends_on:
       - redis
       - postgres
+    restart: always
 
   worker:
     build: .
@@ -36,7 +41,4 @@ services:
     depends_on:
       - redis
       - postgres
-
-volumes:
-  redis_data:
-  pg_data:
+    restart: always
