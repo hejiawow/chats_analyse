@@ -386,6 +386,7 @@ async function startBatchPolling(taskId) {
         submitting.value = false
         cancelling.value = false
 
+        // 如果是 error 状态，显示错误提示
         if (progress.status === 'error') {
           message.error('批量质检失败：' + (progress.error_message || '未知错误'))
         }

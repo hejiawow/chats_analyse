@@ -25,6 +25,19 @@ redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 BATCH_PROGRESS_KEY_PREFIX = "batch:progress:"
 BATCH_ERRORS_KEY_PREFIX = "batch:errors:"
 BATCH_CANCEL_KEY_PREFIX = "batch:cancel:"
+LOGS_KEY_PREFIX = "task:logs:"
+
+
+# === 日志记录函数 ===
+
+def _log(task_id: str, message: str, level: str = "info"):
+    """向指定任务的日志列表追加一条日志（写入 Redis）"""
+    log_entry = json.dumps({
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "level": level,
+        "message": message,
+    })
+    redis_client.rpush(f"{LOGS_KEY_PREFIX}{task_id}", log_entry)
 
 
 # === 姓名获取辅助函数 ===
@@ -520,6 +533,7 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
         # 检查是否需要按销售ID筛选
         if user_id_filter and message.get("user_id") != user_id_filter:
             continue
+
 
         content = message.get("sentence", "")
         if content:
