@@ -26,6 +26,19 @@ redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 BATCH_PROGRESS_KEY_PREFIX = "batch:progress:"
 BATCH_ERRORS_KEY_PREFIX = "batch:errors:"
 BATCH_CANCEL_KEY_PREFIX = "batch:cancel:"
+LOGS_KEY_PREFIX = "task:logs:"
+
+
+# === 日志记录函数 ===
+
+def _log(task_id: str, message: str, level: str = "info"):
+    """向指定任务的日志列表追加一条日志（写入 Redis）"""
+    log_entry = json.dumps({
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "level": level,
+        "message": message,
+    })
+    redis_client.rpush(f"{LOGS_KEY_PREFIX}{task_id}", log_entry)
 
 # 批量任务状态枚举
 # - running: 执行中
