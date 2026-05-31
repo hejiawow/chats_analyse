@@ -21,6 +21,19 @@ redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 BATCH_PROGRESS_KEY_PREFIX = "batch:progress:"
 BATCH_ERRORS_KEY_PREFIX = "batch:errors:"
 BATCH_CANCEL_KEY_PREFIX = "batch:cancel:"
+LOGS_KEY_PREFIX = "task:logs:"
+
+
+# === 日志记录函数 ===
+
+def _log(task_id: str, message: str, level: str = "info"):
+    """向指定任务的日志列表追加一条日志（写入 Redis）"""
+    log_entry = json.dumps({
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "level": level,
+        "message": message,
+    })
+    redis_client.rpush(f"{LOGS_KEY_PREFIX}{task_id}", log_entry)
 
 
 # === 姓名获取辅助函数 ===
@@ -331,6 +344,7 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
     """处理单个匹配到关键词的销售-好友对"""
     # 检查任务是否被取消
     if is_batch_cancelled(batch_task_id):
+        _log(batch_task_id, f"[取消] 销售:{user_id} 好友:{friend_id} 任务已取消", "info")
         return {
             "status": "cancelled",
             "user_id": user_id,
@@ -338,11 +352,15 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
             "keyword_detected": "no",
         }
 
+    _log(batch_task_id, f"[开始] 销售:{user_id} 好友:{friend_id} 开始分析", "info")
+
     try:
         # 获取完整聊天记录
+        _log(batch_task_id, f"[获取] 销售:{user_id} 好友:{friend_id} 正在获取聊天记录...", "info")
         chat_records = get_chat_records(user_id, friend_id, start_time, end_time)
 
         if not chat_records:
+            _log(batch_task_id, f"[无数据] 销售:{user_id} 好友:{friend_id} 无聊天记录", "info")
             increment_batch_progress(batch_task_id)
             return {
                 "status": "no_chat",
@@ -350,6 +368,8 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
                 "friend_id": friend_id,
                 "keyword_detected": "no",
             }
+
+        _log(batch_task_id, f"[分析] 销售:{user_id} 好友:{friend_id} 获取到 {len(chat_records)} 条记录，开始质检...", "info")
 
         # 执行质检分析
         result = quality_check_agent(
@@ -360,6 +380,7 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
 
         # 只有检测到关键词才保存到数据库
         if result.get("keyword_detected") == "yes":
+            _log(batch_task_id, f"[风险] 销售:{user_id} 好友:{friend_id} 检测到关键词: {result.get('detected_keywords')}, 风险等级: {result.get('risk_level')}", "info")
             user_name = _get_user_name(user_id)
             friend_info = _get_friend_info(user_id, friend_id)
             with Session(sync_engine) as session:
@@ -390,6 +411,8 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
                 )
                 session.add(record)
                 session.commit()
+        else:
+            _log(batch_task_id, f"[正常] 销售:{user_id} 好友:{friend_id} 未检测到风险关键词", "info")
 
         # 更新进度
         increment_batch_progress(batch_task_id)
@@ -404,6 +427,7 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
         }
 
     except Exception as e:
+        _log(batch_task_id, f"[错误] 销售:{user_id} 好友:{friend_id} 分析失败: {str(e)}", "error")
         increment_batch_progress(batch_task_id)
         record_batch_error(batch_task_id, user_id, friend_id, str(e))
         return {
@@ -434,12 +458,28 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
     """
     from app.agents.quality_check import _get_active_keywords, _detect_keywords
 
-    # 1. 获取所有聊天记录
-    all_messages = get_all_chat_messages(start_time, end_time)
+    # 任务启动日志
+    _log(batch_task_id, f"[启动] 批量质检任务开始，时间范围: {start_time} ~ {end_time}", "info")
+    if user_id_filter:
+        _log(batch_task_id, f"[筛选] 指定销售ID: {user_id_filter}", "info")
+
+    # 1. 获取所有聊天记录（捕获 API 连接失败等错误）
+    _log(batch_task_id, "[请求] 正在获取聊天记录...", "info")
+    try:
+        all_messages = get_all_chat_messages(start_time, end_time)
+    except Exception as e:
+        error_msg = str(e)
+        _log(batch_task_id, f"[错误] 获取聊天记录失败: {error_msg}", "error")
+        # 更新进度状态为 error，包含错误信息
+        update_batch_progress(batch_task_id, 0, 0, "error", error_message=error_msg)
+        return {"status": "error", "error_message": error_msg}
 
     if not all_messages:
+        _log(batch_task_id, "[无数据] 时间范围内无聊天记录", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_messages")
-        return {"status": "error", "message": "时间范围内无聊天记录"}
+        return {"status": "no_messages", "message": "时间范围内无聊天记录"}
+
+    _log(batch_task_id, f"[成功] 获取到 {len(all_messages)} 条聊天记录", "info")
 
     # 2. 获取启用的关键词列表
     keywords = _get_active_keywords()
@@ -469,7 +509,10 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
             {"keyword": "承诺没兑现", "category": "fraud", "severity": "medium"},
         ]
 
-    # 3. 对每条聊天记录进行关键词匹配，提取匹配的销售-好友对
+    _log(batch_task_id, f"[关键词] 已加载 {len(keywords)} 个风险关键词", "info")
+
+    # 3. 对每条聊天记录进行关键词匹配，提取匹配的销售-好友对（带白名单过滤）
+    _log(batch_task_id, "[匹配] 正在进行关键词匹配...", "info")
     matched_pairs = set()
     keyword_set = {kw["keyword"].lower() for kw in keywords}
 
@@ -477,6 +520,7 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
         # 检查是否需要按销售ID筛选
         if user_id_filter and message.get("user_id") != user_id_filter:
             continue
+
 
         content = message.get("sentence", "")
         if content:
@@ -498,11 +542,15 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
     matched_pairs = list(matched_pairs)[:limit]
 
     if not matched_pairs:
+        _log(batch_task_id, "[完成] 未匹配到任何关键词", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_matches")
-        return {"status": "completed", "message": "未匹配到任何关键词", "total_pairs": 0}
+        return {"status": "no_matches", "message": "未匹配到任何关键词", "total_pairs": 0}
+
+    _log(batch_task_id, f"[匹配] 发现 {len(matched_pairs)} 个匹配关键词的销售-好友对", "info")
 
     # 5. 初始化进度
     update_batch_progress(batch_task_id, 0, len(matched_pairs), "running")
+    _log(batch_task_id, f"[分发] 开始分发 {len(matched_pairs)} 个子任务...", "info")
 
     # 6. 创建子任务列表
     subtasks = [

@@ -145,7 +145,7 @@
     </a-modal>
 
     <!-- 聊天记录弹窗 -->
-    <a-modal v-model:open="chatRecordsVisible" title="全部聊天记录" width="800px" :footer="null" :closable="true">
+    <a-modal v-model:open="chatRecordsVisible" title="全部聊天记录" width="900px" :footer="null" :closable="true">
       <div v-if="chatRecordsLoading" style="text-align: center; padding: 40px">
         <a-spin />
       </div>
