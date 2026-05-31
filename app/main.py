@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.models.database import init_db, async_engine
-from app.api import query, referral_query, case_query, script_lib, rag_query, sales_journey_query, follow_up_query, auth, users, roles, quality_check_query, keyword_config
+from app.api import query, referral_query, case_query, script_lib, rag_query, sales_journey_query, follow_up_query, auth, users, roles, quality_check_query, keyword_config, logs
 from app.tasks.analysis import run_analysis, get_task_logs, clear_task_logs, is_task_done
 from app.models.result import SalesJourneyResult  # ensure table creation
 from app.services.hujing_api import (
@@ -30,6 +30,9 @@ from app.services.hujing_api import (
 from app.tasks.batch_quality import run_batch_quality_check, get_batch_progress, cancel_batch_task, run_batch_quality_check_by_messages
 from app.services.datasource.manager import DataSourceManager
 from app.services.dependencies import require_permission, require_auth, get_current_user
+from app.middleware.logging_middleware import AccessLogMiddleware
+from app.middleware.exception_handler import ExceptionHandlerMiddleware
+from app.services.audit_service import audit_service
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +107,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 注册中间件（注意：执行顺序反向，最后添加的先执行）
+app.add_middleware(AccessLogMiddleware)
+app.add_middleware(ExceptionHandlerMiddleware)  # 异常处理在最外层
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(","),
@@ -125,15 +132,18 @@ app.include_router(script_lib.router, prefix="/api", tags=["话术库"])
 app.include_router(rag_query.router, prefix="/api", tags=["RAG问答"])
 app.include_router(quality_check_query.router, prefix="/api", tags=["质检检测"])
 app.include_router(keyword_config.router, prefix="/api", tags=["关键词配置"])
+app.include_router(logs.router, prefix="/api", tags=["日志管理"])
 
 
 @app.post("/api/trigger")
 async def trigger_analysis(
     req: TriggerRequest,
+    request: Request,
     current_user: dict = Depends(require_permission("write:trigger")),
 ):
     """触发分析 — 提交到 Celery 异步执行（3 个 Agent）"""
     task_id = req.task_id or str(uuid.uuid4())
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     try:
         # === 场景：姓名 + 标识（手机号/微信号/客户别名），需要处理重名 ===
         if req.user_name and not req.user_id and not req.friend_id:
@@ -176,6 +186,18 @@ async def trigger_analysis(
             datasource=req.datasource,  # 传递数据源
         )
 
+        # 记录审计日志
+        await audit_service.log_trigger_analysis(
+            user_id=current_user["user_id"],
+            username=current_user["username"],
+            task_id=task_id,
+            agent="all",
+            datasource=req.datasource,
+            target_user_id=user_id,
+            target_friend_id=friend_id,
+            ip_address=ip_address,
+        )
+
         return {
             "task_id": task_id,
             "message": "分析任务已提交，正在后台执行中...",
@@ -197,10 +219,12 @@ async def get_datasources(current_user: dict = Depends(require_auth)):
 @app.post("/api/trigger/single")
 async def trigger_single_agent(
     req: TriggerRequest,
+    request: Request,
     current_user: dict = Depends(require_permission("write:trigger")),
 ):
     """触发智能体分析（支持单个或多个，逗号分隔）— 提交到 Celery 异步执行"""
     task_id = req.task_id or str(uuid.uuid4())
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
 
     agent_map = {
         "referral": "转介绍检测",
@@ -235,6 +259,18 @@ async def trigger_single_agent(
             datasource=req.datasource,  # 传递数据源
         )
 
+        # 记录审计日志
+        await audit_service.log_trigger_analysis(
+            user_id=current_user["user_id"],
+            username=current_user["username"],
+            task_id=task_id,
+            agent=req.agent,
+            datasource=req.datasource,
+            target_user_id=user_id,
+            target_friend_id=friend_id,
+            ip_address=ip_address,
+        )
+
         return {
             "task_id": task_id,
             "message": f"[{' / '.join(agent_names)}] 分析任务已提交，正在后台执行中...",
@@ -249,10 +285,12 @@ async def trigger_single_agent(
 @app.post("/api/trigger/sales-journey")
 async def trigger_sales_journey(
     req: TriggerRequest,
+    request: Request,
     current_user: dict = Depends(require_permission("write:trigger")),
 ):
     """单独触发「优秀成交案例提取」Agent — 提交到 Celery 异步执行"""
     task_id = req.task_id or str(uuid.uuid4())
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     try:
         user_id, friend_id = _resolve_ids(req)
 
@@ -265,6 +303,18 @@ async def trigger_sales_journey(
             friend_wx_id=req.friend_wx_id,
             friend_nick=req.friend_nick,
             agent="journey",  # 只执行优秀成交案例提取
+        )
+
+        # 记录审计日志
+        await audit_service.log_trigger_analysis(
+            user_id=current_user["user_id"],
+            username=current_user["username"],
+            task_id=task_id,
+            agent="journey",
+            datasource="hujing",
+            target_user_id=user_id,
+            target_friend_id=friend_id,
+            ip_address=ip_address,
         )
 
         return {
@@ -281,10 +331,12 @@ async def trigger_sales_journey(
 @app.post("/api/trigger/quality-check")
 async def trigger_quality_check(
     req: TriggerRequest,
+    request: Request,
     current_user: dict = Depends(require_permission("write:trigger")),
 ):
     """质检专用触发接口：自动计算昨天此时到今天此时，执行关键词检测 + AI分析"""
     task_id = req.task_id or str(uuid.uuid4())
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     try:
         user_id, friend_id = _resolve_ids(req)
 
@@ -306,6 +358,18 @@ async def trigger_quality_check(
             datasource=req.datasource,
             start_time=start_time,
             end_time=end_time,
+        )
+
+        # 记录审计日志
+        await audit_service.log_trigger_analysis(
+            user_id=current_user["user_id"],
+            username=current_user["username"],
+            task_id=task_id,
+            agent="quality_check",
+            datasource=req.datasource,
+            target_user_id=user_id,
+            target_friend_id=friend_id,
+            ip_address=ip_address,
         )
 
         return {
@@ -330,10 +394,12 @@ class BatchQualityCheckRequest(BaseModel):
 @app.post("/api/trigger/batch-quality-check")
 async def trigger_batch_quality_check(
     req: BatchQualityCheckRequest,
+    request: Request,
     current_user: dict = Depends(require_permission("write:trigger")),
 ):
     """批量质检触发接口：分析指定时间范围内有聊天记录的聊天对"""
     task_id = str(uuid.uuid4())
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
 
     # 计算时间范围：默认昨天此时到今天此时
     now = datetime.now()
@@ -348,6 +414,16 @@ async def trigger_batch_quality_check(
         end_time=end_time,
         user_id_filter=req.user_id,
         limit=req.limit,
+    )
+
+    # 记录审计日志
+    await audit_service.log_batch_quality_check(
+        user_id=current_user["user_id"],
+        username=current_user["username"],
+        task_id=task_id,
+        time_range={"start": start_time, "end": end_time},
+        limit=req.limit,
+        ip_address=ip_address,
     )
 
     return {
@@ -410,9 +486,24 @@ async def get_batch_quality_check_errors(task_id: str, current_user: dict = Depe
 
 
 @app.post("/api/batch-quality-check/{task_id}/cancel")
-async def cancel_batch_quality_check(task_id: str, current_user: dict = Depends(require_permission("write:trigger"))):
+async def cancel_batch_quality_check(
+    task_id: str,
+    request: Request,
+    current_user: dict = Depends(require_permission("write:trigger")),
+):
     """取消批量质检任务"""
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
     cancel_batch_task(task_id)
+
+    # 记录审计日志
+    await audit_service.log_cancel_task(
+        user_id=current_user["user_id"],
+        username=current_user["username"],
+        task_id=task_id,
+        task_type="batch_quality_check",
+        ip_address=ip_address,
+    )
+
     return {"task_id": task_id, "status": "cancelling", "message": "任务取消请求已提交"}
 
 

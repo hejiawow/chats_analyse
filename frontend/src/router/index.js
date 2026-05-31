@@ -26,6 +26,7 @@ const routes = [
       { path: 'agents', name: 'Agents', component: () => import('@/views/Agents.vue'), meta: { permission: 'read:agents' } },
       { path: 'users', name: 'Users', component: () => import('@/views/Users.vue'), meta: { permission: 'admin:user' } },
       { path: 'roles', name: 'Roles', component: () => import('@/views/Roles.vue'), meta: { permission: 'admin:role' } },
+      { path: 'logs', name: 'Logs', component: () => import('@/views/Logs.vue'), meta: { permission: 'admin:logs' } },
     ],
   },
 ]
