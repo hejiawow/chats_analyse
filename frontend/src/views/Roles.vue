@@ -74,6 +74,8 @@ const allPermissions = [
   { value: 'read:cases', label: '查看优秀案例' },
   { value: 'read:journey', label: '查看成交案例' },
   { value: 'read:followup', label: '查看督学合规' },
+  { value: 'read:quality_check', label: '查看质检结果' },
+  { value: 'write:quality_check', label: '触发质检分析' },
   { value: 'read:scriptlib', label: '查看话术库' },
   { value: 'write:scriptlib', label: '存入话术库' },
   { value: 'read:rag', label: '使用RAG问答' },

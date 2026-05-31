@@ -15,8 +15,8 @@ const routes = [
     children: [
       { path: '', name: 'Dashboard', component: () => import('@/views/Dashboard.vue'), meta: { permission: 'read:dashboard' } },
       { path: 'trigger', name: 'Trigger', component: () => import('@/views/Trigger.vue'), meta: { permission: 'write:trigger' } },
-      { path: 'quality-check', name: 'QualityCheck', component: () => import('@/views/QualityCheck.vue'), meta: { permission: 'write:trigger' } },
-      { path: 'quality-results', name: 'QualityResults', component: () => import('@/views/QualityResults.vue'), meta: { permission: 'read:referral' } },
+      { path: 'quality-check', name: 'QualityCheck', component: () => import('@/views/QualityCheck.vue'), meta: { permission: 'write:quality_check' } },
+      { path: 'quality-results', name: 'QualityResults', component: () => import('@/views/QualityResults.vue'), meta: { permission: 'read:quality_check' } },
       { path: 'referral', name: 'Referral', component: () => import('@/views/Referral.vue'), meta: { permission: 'read:referral' } },
       { path: 'cases', name: 'Cases', component: () => import('@/views/Cases.vue'), meta: { permission: 'read:cases' } },
       { path: 'success', name: 'Success', component: () => import('@/views/Success.vue'), meta: { permission: 'read:journey' } },

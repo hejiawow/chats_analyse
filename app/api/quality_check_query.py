@@ -45,7 +45,7 @@ async def query_quality_check_results(
     end_time: str | None = Query(None, description="结束时间（YYYY-MM-DD HH:mm:ss）"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    current_user: dict = Depends(require_permission("read:referral")),
+    current_user: dict = Depends(require_permission("read:quality_check")),
 ):
     """查询质检检测结果，支持筛选。非 admin 用户只能查看自己的数据。
 
@@ -109,7 +109,7 @@ async def get_quality_check_stats(
     keyword: str | None = Query(None, description="关键词"),
     start_time: str | None = Query(None, description="开始时间（YYYY-MM-DD HH:mm:ss）"),
     end_time: str | None = Query(None, description="结束时间（YYYY-MM-DD HH:mm:ss）"),
-    current_user: dict = Depends(require_permission("read:referral")),
+    current_user: dict = Depends(require_permission("read:quality_check")),
 ):
     """获取质检结果统计：总数、风险分布、关键词频次（支持筛选）
 
@@ -218,7 +218,7 @@ async def export_quality_check_results(
     start_time: str | None = Query(None, description="开始时间（YYYY-MM-DD HH:mm:ss）"),
     end_time: str | None = Query(None, description="结束时间（YYYY-MM-DD HH:mm:ss）"),
     limit: int = Query(10000, ge=1, le=50000, description="导出数量上限"),
-    current_user: dict = Depends(require_permission("read:referral")),
+    current_user: dict = Depends(require_permission("read:quality_check")),
 ):
     """导出质检结果为 CSV 文件（带数量限制）
 
@@ -295,7 +295,7 @@ async def export_quality_check_results(
 @router.get("/quality-check/{result_id}/chat-records")
 async def get_quality_check_chat_records(
     result_id: int,
-    current_user: dict = Depends(require_permission("read:referral")),
+    current_user: dict = Depends(require_permission("read:quality_check")),
 ):
     """获取质检结果对应的全部聊天记录"""
     async with async_session() as session:
@@ -337,7 +337,7 @@ async def get_quality_check_chat_records(
 @router.get("/quality-check/{result_id}")
 async def get_quality_check_detail(
     result_id: int,
-    current_user: dict = Depends(require_permission("read:referral")),
+    current_user: dict = Depends(require_permission("read:quality_check")),
 ):
     """获取单条质检检测结果"""
     async with async_session() as session:

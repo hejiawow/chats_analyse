@@ -332,7 +332,7 @@ async def trigger_sales_journey(
 async def trigger_quality_check(
     req: TriggerRequest,
     request: Request,
-    current_user: dict = Depends(require_permission("write:trigger")),
+    current_user: dict = Depends(require_permission("write:quality_check")),
 ):
     """质检专用触发接口：自动计算昨天此时到今天此时，执行关键词检测 + AI分析"""
     task_id = req.task_id or str(uuid.uuid4())
@@ -395,7 +395,7 @@ class BatchQualityCheckRequest(BaseModel):
 async def trigger_batch_quality_check(
     req: BatchQualityCheckRequest,
     request: Request,
-    current_user: dict = Depends(require_permission("write:trigger")),
+    current_user: dict = Depends(require_permission("write:quality_check")),
 ):
     """批量质检触发接口：分析指定时间范围内有聊天记录的聊天对"""
     task_id = str(uuid.uuid4())
@@ -436,7 +436,7 @@ async def trigger_batch_quality_check(
 @app.post("/api/trigger/batch-quality-check-by-messages")
 async def trigger_batch_quality_check_by_messages(
     req: BatchQualityCheckRequest,
-    current_user: dict = Depends(require_permission("write:trigger")),
+    current_user: dict = Depends(require_permission("write:quality_check")),
 ):
     """新批量质检触发接口：基于聊天记录的关键词匹配
 
@@ -489,7 +489,7 @@ async def get_batch_quality_check_errors(task_id: str, current_user: dict = Depe
 async def cancel_batch_quality_check(
     task_id: str,
     request: Request,
-    current_user: dict = Depends(require_permission("write:trigger")),
+    current_user: dict = Depends(require_permission("write:quality_check")),
 ):
     """取消批量质检任务"""
     ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")

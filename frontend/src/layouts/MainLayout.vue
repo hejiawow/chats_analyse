@@ -72,8 +72,8 @@ const currentTime = ref('')
 const allMenuItems = [
   { key: 'Dashboard', label: '工作台', icon: DashboardOutlined, permission: 'read:dashboard' },
   { key: 'Trigger', label: '触发分析', icon: ThunderboltOutlined, permission: 'write:trigger' },
-  { key: 'QualityCheck', label: '质检分析', icon: SafetyOutlined, permission: 'write:trigger' },
-  { key: 'QualityResults', label: '质检结果', icon: FileSearchOutlined, permission: 'read:referral' },
+  { key: 'QualityCheck', label: '质检分析', icon: SafetyOutlined, permission: 'write:quality_check' },
+  { key: 'QualityResults', label: '质检结果', icon: FileSearchOutlined, permission: 'read:quality_check' },
   { key: 'Referral', label: '转介绍检测', icon: ShareAltOutlined, permission: 'read:referral' },
   { key: 'Cases', label: '优秀话术提取', icon: FileTextOutlined, permission: 'read:cases' },
   { key: 'Success', label: '成功案例', icon: TrophyOutlined, permission: 'read:journey' },
