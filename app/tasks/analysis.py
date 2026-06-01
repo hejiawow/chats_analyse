@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """分析任务 Worker — 带实时日志"""
 import json
+import logging
 import traceback
 import time
 from datetime import datetime
@@ -21,8 +22,6 @@ redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 # 本地线程锁（仅用于本地操作）
 import threading
 _task_logs_lock = threading.Lock()
-
-
 
 
 

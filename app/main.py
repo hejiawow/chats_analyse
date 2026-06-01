@@ -134,6 +134,8 @@ app.include_router(rag_query.router, prefix="/api", tags=["RAG问答"])
 app.include_router(quality_check_query.router, prefix="/api", tags=["质检检测"])
 app.include_router(keyword_config.router, prefix="/api", tags=["关键词配置"])
 app.include_router(logs.router, prefix="/api", tags=["日志管理"])
+# TODO: 退费白名单路由 — 待 app/api/refund_whitelist_query.py 模块实现后启用
+# app.include_router(refund_whitelist_query.router, prefix="/api", tags=["协议话术白名单"])
 
 
 @app.post("/api/trigger")
@@ -443,9 +445,12 @@ async def trigger_batch_quality_check_by_messages(
 
     流程：
     1. 获取时间范围内所有聊天记录
-    2. 对每条聊天记录进行关键词匹配
-    3. 提取匹配到的销售ID和好友ID，去重
-    4. 对去重后的销售-好友对进行质检分析
+    2. 获取启用的关键词列表
+    3. 对每条聊天记录进行关键词匹配，提取匹配的销售-好友对
+    4. 限制分析数量
+    5. 初始化批量任务进度
+    6. 创建 Celery 子任务列表
+    7. 使用 chord 分发子任务，完成后触发回调
     """
     task_id = str(uuid.uuid4())
 

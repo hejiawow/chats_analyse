@@ -108,7 +108,7 @@
     </a-table>
 
     <!-- 详情弹窗 -->
-    <a-modal v-model:open="detailVisible" title="质检详情" width="750px" okText="确定" cancelText="取消">
+    <a-modal style="top: 20px" v-model:open="detailVisible" title="质检详情" width="750px" okText="确定" cancelText="取消">
       <a-descriptions v-if="detailData" :column="1" bordered size="small" :label-style="{ width: '120px', minWidth: '120px' }">
         <a-descriptions-item label="销售ID">{{ detailData.user_id }}</a-descriptions-item>
         <a-descriptions-item label="销售姓名">{{ detailData.user_name || '-' }}</a-descriptions-item>
@@ -145,7 +145,7 @@
     </a-modal>
 
     <!-- 聊天记录弹窗 -->
-    <a-modal v-model:open="chatRecordsVisible" title="全部聊天记录" width="900px" :footer="null" :closable="true">
+    <a-modal style="top: 20px" v-model:open="chatRecordsVisible" title="全部聊天记录" width="900px" :footer="null" :closable="true">
       <div v-if="chatRecordsLoading" style="text-align: center; padding: 40px">
         <a-spin />
       </div>
@@ -573,7 +573,7 @@ onMounted(() => {
 
 /* 聊天记录弹窗样式 - 微信风格 */
 .chat-records-list {
-  max-height: 500px;
+  max-height: 1000px;
 }
 
 .chat-records-header {
@@ -586,7 +586,7 @@ onMounted(() => {
 
 .chat-records-content {
   padding: 16px;
-  max-height: 420px;
+  max-height: 800px;
   overflow-y: auto;
   background: #ededed;
 }
