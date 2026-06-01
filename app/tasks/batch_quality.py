@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """批量质检任务 — Celery并发处理（使用 chat/pairs API）"""
 import json
+import logging
 from datetime import datetime, timedelta
 from celery import chord
 from sqlalchemy.orm import Session
@@ -13,6 +14,9 @@ from app.models.result import QualityCheckResult
 from config import settings
 from app.api.quality_check_query import invalidate_quality_check_stats_cache
 from app.services.cache import cache_clear_pattern
+from app.services.log_service import log as _log, LOGS_KEY_PREFIX
+
+logger = logging.getLogger(__name__)
 
 import redis
 redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -21,19 +25,6 @@ redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 BATCH_PROGRESS_KEY_PREFIX = "batch:progress:"
 BATCH_ERRORS_KEY_PREFIX = "batch:errors:"
 BATCH_CANCEL_KEY_PREFIX = "batch:cancel:"
-LOGS_KEY_PREFIX = "task:logs:"
-
-
-# === 日志记录函数 ===
-
-def _log(task_id: str, message: str, level: str = "info"):
-    """向指定任务的日志列表追加一条日志（写入 Redis）"""
-    log_entry = json.dumps({
-        "time": datetime.now().strftime("%H:%M:%S"),
-        "level": level,
-        "message": message,
-    })
-    redis_client.rpush(f"{LOGS_KEY_PREFIX}{task_id}", log_entry)
 
 
 # === 姓名获取辅助函数 ===
@@ -304,7 +295,7 @@ def run_batch_quality_check(self, batch_task_id: str, start_time: str, end_time:
 
     if not pairs:
         update_batch_progress(batch_task_id, 0, 0, "no_pairs")
-        return {"status": "error", "message": "时间范围内无聊天记录"}
+        return {"status": "no_pairs", "message": "时间范围内无聊天记录"}
 
     # 2. 可选：按 user_id 筛选
     if user_id_filter:
@@ -455,6 +446,13 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
         end_time: 检测结束时间
         user_id_filter: 可选，筛选特定销售ID
         limit: 最大分析数量
+
+    Returns:
+        dict: 包含 status 字段，可能值：
+            - "started": 子任务已分发
+            - "no_messages": 时间范围内无聊天记录
+            - "no_matches": 未匹配到任何关键词
+            - "error": API 连接失败（含 error_message 字段）
     """
     from app.agents.quality_check import _get_active_keywords, _detect_keywords
 
@@ -470,8 +468,10 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
     except Exception as e:
         error_msg = str(e)
         _log(batch_task_id, f"[错误] 获取聊天记录失败: {error_msg}", "error")
-        # 更新进度状态为 error，包含错误信息
-        update_batch_progress(batch_task_id, 0, 0, "error", error_message=error_msg)
+        try:
+            update_batch_progress(batch_task_id, 0, 0, "error", error_message=error_msg)
+        except Exception:
+            logger.exception(f"Failed to update progress for task {batch_task_id}")
         return {"status": "error", "error_message": error_msg}
 
     if not all_messages:
@@ -511,7 +511,7 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
 
     _log(batch_task_id, f"[关键词] 已加载 {len(keywords)} 个风险关键词", "info")
 
-    # 3. 对每条聊天记录进行关键词匹配，提取匹配的销售-好友对（带白名单过滤）
+    # 3. 对每条聊天记录进行关键词匹配，提取匹配的销售-好友对（可选按销售ID筛选）
     _log(batch_task_id, "[匹配] 正在进行关键词匹配...", "info")
     matched_pairs = set()
     keyword_set = {kw["keyword"].lower() for kw in keywords}
@@ -520,7 +520,6 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
         # 检查是否需要按销售ID筛选
         if user_id_filter and message.get("user_id") != user_id_filter:
             continue
-
 
         content = message.get("sentence", "")
         if content:

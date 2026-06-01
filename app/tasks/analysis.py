@@ -2,7 +2,6 @@
 """分析任务 Worker — 带实时日志"""
 import json
 import traceback
-import threading
 import time
 from datetime import datetime
 from app.celery_app import celery_app
@@ -13,56 +12,19 @@ import app.agents  # noqa: F401 - 触发所有 Agent 的注册
 from app.models.result import ReferralResult, CaseExtractionResult, SalesJourneyResult, FollowUpComplianceResult, QualityCheckResult
 from app.models.database import sync_engine
 from config import settings
+from app.services.log_service import log as _log, get_task_logs, mark_task_done, is_task_done, clear_task_logs
 
 # 使用 Redis 存储日志和任务状态（跨进程共享）
 import redis
 redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 # 本地线程锁（仅用于本地操作）
+import threading
 _task_logs_lock = threading.Lock()
 
-# Redis key 前缀
-LOGS_KEY_PREFIX = "task:logs:"
-DONE_KEY_PREFIX = "task:done:"
 
 
-def _log(task_id: str, message: str, level: str = "info"):
-    """向指定任务的日志列表追加一条日志（写入 Redis）"""
-    log_entry = json.dumps({
-        "time": datetime.now().strftime("%H:%M:%S"),
-        "level": level,
-        "message": message,
-    })
-    redis_client.rpush(f"{LOGS_KEY_PREFIX}{task_id}", log_entry)
 
-
-def get_task_logs(task_id: str) -> list[dict]:
-    """获取指定任务的日志（从 Redis 读取）"""
-    key = f"{LOGS_KEY_PREFIX}{task_id}"
-    logs = redis_client.lrange(key, 0, -1)
-    result = []
-    for log_str in logs:
-        try:
-            result.append(json.loads(log_str))
-        except json.JSONDecodeError:
-            pass
-    return result
-
-
-def is_task_done(task_id: str) -> bool:
-    """检查任务是否完成（从 Redis 读取）"""
-    return redis_client.get(f"{DONE_KEY_PREFIX}{task_id}") == "1"
-
-
-def mark_task_done(task_id: str):
-    """标记任务已完成（写入 Redis）"""
-    redis_client.set(f"{DONE_KEY_PREFIX}{task_id}", "1", ex=3600)  # 1小时后自动过期
-
-
-def clear_task_logs(task_id: str):
-    """清理过期日志（从 Redis 删除）"""
-    redis_client.delete(f"{LOGS_KEY_PREFIX}{task_id}")
-    redis_client.delete(f"{DONE_KEY_PREFIX}{task_id}")
 
 
 def _save_referral(user_id, user_wx_id, friend_id, friend_wx_id, friend_nick,

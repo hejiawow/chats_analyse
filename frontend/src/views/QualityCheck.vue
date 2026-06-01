@@ -101,7 +101,7 @@
         执行日志
         <span class="qc-batch-logs-count">（{{ batchLogs.length }} 条）</span>
       </div>
-      <div class="qc-batch-logs-content">
+      <div ref="logsContentRef" class="qc-batch-logs-content">
         <div v-for="(log, idx) in batchLogs" :key="idx" :class="['log-item', log.level]">
           <span class="log-time">{{ log.time }}</span>
           <span class="log-message">{{ log.message }}</span>
@@ -204,7 +204,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { SafetyOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { getQualityCheckList, getQualityCheckDetail, triggerBatchQualityCheck, getBatchProgress, getBatchErrors, cancelBatchQualityCheck, triggerBatchQualityCheckByMessages, getQualityCheckChatRecords, getLogs } from '@/api/qualitycheck'
@@ -224,6 +224,9 @@ const batchProgress = reactive({ completed: 0, total: 0, status: '', risk_detect
 const batchTaskId = ref('')
 const batchLogs = ref([])
 let batchPollInterval = null
+let pollFailCount = 0
+const MAX_POLL_FAILS = 10
+const logsContentRef = ref(null)
 
 // History
 const history = ref([])
@@ -343,34 +346,39 @@ function formatChatTime(time) {
 async function startBatchPolling(taskId) {
   batchPollInterval = setInterval(async () => {
     try {
-      // 同时获取进度和日志
-      const [progress, logsRes] = await Promise.all([
+      // 并行获取进度和日志（互不干扰）
+      const [progressRes, logsRes] = await Promise.allSettled([
         getBatchProgress(taskId),
         getLogs(taskId)
       ])
 
-      batchProgress.completed = progress.completed || 0
-      batchProgress.total = progress.total || 0
-      batchProgress.status = progress.status || ''
-      batchProgress.risk_detected = progress.risk_detected || 0
-      batchProgress.no_chat = progress.no_chat || 0
-      batchProgress.failed = progress.failed || 0
-      batchProgress.cancelled = progress.cancelled || 0
-      batchProgress.error_message = progress.error_message || ''
+      // 更新进度（即使日志获取失败也继续）
+      if (progressRes.status === 'fulfilled') {
+        const progress = progressRes.value
+        batchProgress.completed = progress.completed || 0
+        batchProgress.total = progress.total || 0
+        batchProgress.status = progress.status || ''
+        batchProgress.risk_detected = progress.risk_detected || 0
+        batchProgress.no_chat = progress.no_chat || 0
+        batchProgress.failed = progress.failed || 0
+        batchProgress.cancelled = progress.cancelled || 0
+        batchProgress.error_message = progress.error_message || ''
+      }
 
       // 更新日志
-      if (logsRes.logs && logsRes.logs.length > 0) {
-        batchLogs.value = logsRes.logs
-        // 自动滚动到底部
+      if (logsRes.status === 'fulfilled' && logsRes.value?.logs?.length > 0) {
+        batchLogs.value = logsRes.value.logs
         nextTick(() => {
-          const logsContainer = document.querySelector('.qc-batch-logs-content')
-          if (logsContainer) {
-            logsContainer.scrollTop = logsContainer.scrollHeight
+          if (logsContentRef.value) {
+            logsContentRef.value.scrollTop = logsContentRef.value.scrollHeight
           }
         })
       }
 
+      pollFailCount = 0
+
       // 检查是否需要停止轮询
+      const progress = progressRes.status === 'fulfilled' ? progressRes.value : {}
       const terminalStates = ['completed', 'cancelled', 'no_sales', 'no_friends', 'no_messages', 'no_pairs', 'no_matches', 'error']
       if (terminalStates.includes(progress.status)) {
         clearInterval(batchPollInterval)
@@ -378,18 +386,23 @@ async function startBatchPolling(taskId) {
         submitting.value = false
         cancelling.value = false
 
-        // 如果是 error 状态，显示错误提示
         if (progress.status === 'error') {
           message.error('批量质检失败：' + (progress.error_message || '未知错误'))
         }
 
-        // 只有成功完成才加载历史记录
         if (progress.status === 'completed' || progress.status === 'cancelled') {
           loadHistory()
         }
       }
-    } catch {
-      // keep polling
+    } catch (err) {
+      pollFailCount++
+      console.error('Polling error:', err)
+      if (pollFailCount >= MAX_POLL_FAILS) {
+        clearInterval(batchPollInterval)
+        batchPollInterval = null
+        submitting.value = false
+        message.error('连接超时，请刷新页面重试')
+      }
     }
   }, 2000)
 }
@@ -482,6 +495,13 @@ async function handleCancelBatch() {
 
 onMounted(() => {
   loadHistory()
+})
+
+onBeforeUnmount(() => {
+  if (batchPollInterval) {
+    clearInterval(batchPollInterval)
+    batchPollInterval = null
+  }
 })
 </script>
 
