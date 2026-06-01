@@ -21,9 +21,12 @@ async_session = async_sessionmaker(async_engine, expire_on_commit=False)
 
 # 同步引擎（Alembic 迁移 / Celery 用）
 # 添加 connect_args 指定 client_encoding 解决 Windows 编码问题
+# pool_size 必须 ≥ AI_MAX_CONCURRENT，避免 worker 进程同时拿连接时阻塞
 sync_engine = create_engine(
     settings.DATABASE_URL_SYNC, 
     echo=False,
+    pool_size=20,
+    max_overflow=10,
     connect_args={'client_encoding': 'utf8'}
 )
 
