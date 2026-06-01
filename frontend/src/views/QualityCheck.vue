@@ -59,7 +59,7 @@
     </div>
 
     <!-- Batch Progress -->
-    <div v-if="batchProgress.total > 0" class="qc-batch-progress">
+    <div v-if="batchProgress.status && batchProgress.status !== ''" class="qc-batch-progress">
       <div class="qc-batch-progress-title">
         批量质检进度：{{ batchProgress.completed }} / {{ batchProgress.total }}
         <a-button
@@ -75,15 +75,37 @@
         </a-button>
         <span v-if="batchProgress.status === 'cancelling'" class="qc-cancelling-tag">取消中...</span>
         <span v-if="batchProgress.status === 'cancelled'" class="qc-cancelled-tag">已取消</span>
+        <span v-if="batchProgress.status === 'error'" class="qc-error-tag">API连接失败</span>
       </div>
       <a-progress
-        :percent="Math.round(batchProgress.completed / batchProgress.total * 100)"
-        :status="batchProgress.status === 'completed' ? 'success' : batchProgress.status === 'cancelled' ? 'exception' : 'active'"
+        :percent="batchProgress.total > 0 ? Math.round(batchProgress.completed / batchProgress.total * 100) : 0"
+        :status="batchProgress.status === 'completed' ? 'success' : batchProgress.status === 'cancelled' || batchProgress.status === 'error' ? 'exception' : 'active'"
+      />
+      <!-- API 错误提示 -->
+      <a-alert
+        v-if="batchProgress.status === 'error'"
+        type="error"
+        :message="batchProgress.error_message || 'API连接失败，请检查虎鲸服务是否正常运行'"
+        style="margin-top: 8px"
       />
       <div v-if="batchProgress.status === 'completed' || batchProgress.status === 'cancelled'" class="qc-batch-summary">
         <span class="qc-summary-item success">风险检测：{{ batchRiskCount }} 个</span>
         <span v-if="batchProgress.cancelled > 0" class="qc-summary-item warning">已取消：{{ batchProgress.cancelled }} 个</span>
         <span class="qc-summary-item error" @click="showBatchErrors">失败：{{ batchProgress.failed || 0 }} 个（点击查看详情）</span>
+      </div>
+    </div>
+
+    <!-- Batch Logs -->
+    <div v-if="batchProgress.status && batchProgress.status !== '' && batchLogs.length > 0" class="qc-batch-logs">
+      <div class="qc-batch-logs-header">
+        执行日志
+        <span class="qc-batch-logs-count">（{{ batchLogs.length }} 条）</span>
+      </div>
+      <div ref="logsContentRef" class="qc-batch-logs-content">
+        <div v-for="(log, idx) in batchLogs" :key="idx" :class="['log-item', log.level]">
+          <span class="log-time">{{ log.time }}</span>
+          <span class="log-message">{{ log.message }}</span>
+        </div>
       </div>
     </div>
 
@@ -182,10 +204,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { SafetyOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
-import { getQualityCheckList, getQualityCheckDetail, triggerBatchQualityCheck, getBatchProgress, getBatchErrors, cancelBatchQualityCheck, triggerBatchQualityCheckByMessages, getQualityCheckChatRecords } from '@/api/qualitycheck'
+import { getQualityCheckList, getQualityCheckDetail, triggerBatchQualityCheck, getBatchProgress, getBatchErrors, cancelBatchQualityCheck, triggerBatchQualityCheckByMessages, getQualityCheckChatRecords, getLogs } from '@/api/qualitycheck'
 
 const submitting = ref(false)
 const errorMsg = ref('')
@@ -198,9 +220,13 @@ const batchForm = reactive({
   user_id: '',
   limit: 500,
 })
-const batchProgress = reactive({ completed: 0, total: 0, status: '', risk_detected: 0, no_chat: 0, failed: 0 })
+const batchProgress = reactive({ completed: 0, total: 0, status: '', risk_detected: 0, no_chat: 0, failed: 0, error_message: '' })
 const batchTaskId = ref('')
+const batchLogs = ref([])
 let batchPollInterval = null
+let pollFailCount = 0
+const MAX_POLL_FAILS = 10
+const logsContentRef = ref(null)
 
 // History
 const history = ref([])
@@ -320,23 +346,63 @@ function formatChatTime(time) {
 async function startBatchPolling(taskId) {
   batchPollInterval = setInterval(async () => {
     try {
-      const progress = await getBatchProgress(taskId)
-      batchProgress.completed = progress.completed || 0
-      batchProgress.total = progress.total || 0
-      batchProgress.status = progress.status || ''
-      batchProgress.risk_detected = progress.risk_detected || 0
-      batchProgress.no_chat = progress.no_chat || 0
-      batchProgress.failed = progress.failed || 0
-      batchProgress.cancelled = progress.cancelled || 0
-      if (progress.status === 'completed' || progress.status === 'cancelled' || progress.status === 'no_sales' || progress.status === 'no_friends') {
+      // 并行获取进度和日志（互不干扰）
+      const [progressRes, logsRes] = await Promise.allSettled([
+        getBatchProgress(taskId),
+        getLogs(taskId)
+      ])
+
+      // 更新进度（即使日志获取失败也继续）
+      if (progressRes.status === 'fulfilled') {
+        const progress = progressRes.value
+        batchProgress.completed = progress.completed || 0
+        batchProgress.total = progress.total || 0
+        batchProgress.status = progress.status || ''
+        batchProgress.risk_detected = progress.risk_detected || 0
+        batchProgress.no_chat = progress.no_chat || 0
+        batchProgress.failed = progress.failed || 0
+        batchProgress.cancelled = progress.cancelled || 0
+        batchProgress.error_message = progress.error_message || ''
+      }
+
+      // 更新日志
+      if (logsRes.status === 'fulfilled' && logsRes.value?.logs?.length > 0) {
+        batchLogs.value = logsRes.value.logs
+        nextTick(() => {
+          if (logsContentRef.value) {
+            logsContentRef.value.scrollTop = logsContentRef.value.scrollHeight
+          }
+        })
+      }
+
+      pollFailCount = 0
+
+      // 检查是否需要停止轮询
+      const progress = progressRes.status === 'fulfilled' ? progressRes.value : {}
+      const terminalStates = ['completed', 'cancelled', 'no_sales', 'no_friends', 'no_messages', 'no_pairs', 'no_matches', 'error']
+      if (terminalStates.includes(progress.status)) {
         clearInterval(batchPollInterval)
         batchPollInterval = null
         submitting.value = false
         cancelling.value = false
-        loadHistory()
+
+        if (progress.status === 'error') {
+          message.error('批量质检失败：' + (progress.error_message || '未知错误'))
+        }
+
+        if (progress.status === 'completed' || progress.status === 'cancelled') {
+          loadHistory()
+        }
       }
-    } catch {
-      // keep polling
+    } catch (err) {
+      pollFailCount++
+      console.error('Polling error:', err)
+      if (pollFailCount >= MAX_POLL_FAILS) {
+        clearInterval(batchPollInterval)
+        batchPollInterval = null
+        submitting.value = false
+        message.error('连接超时，请刷新页面重试')
+      }
     }
   }, 2000)
 }
@@ -361,6 +427,8 @@ async function handleBatchAnalyze() {
   batchProgress.no_chat = 0
   batchProgress.failed = 0
   batchProgress.cancelled = 0
+  batchProgress.error_message = ''
+  batchLogs.value = []  // 清空日志
 
   submitting.value = true
 
@@ -427,6 +495,13 @@ async function handleCancelBatch() {
 
 onMounted(() => {
   loadHistory()
+})
+
+onBeforeUnmount(() => {
+  if (batchPollInterval) {
+    clearInterval(batchPollInterval)
+    batchPollInterval = null
+  }
 })
 </script>
 
@@ -529,6 +604,78 @@ onMounted(() => {
   border-radius: 4px;
   font-size: 12px;
   font-weight: 500;
+}
+
+.qc-error-tag {
+  margin-left: 12px;
+  padding: 2px 8px;
+  background: #fee2e2;
+  color: #dc2626;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Batch Logs */
+.qc-batch-logs {
+  margin-top: 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.qc-batch-logs-header {
+  padding: 10px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.qc-batch-logs-count {
+  font-weight: 400;
+  color: #94a3b8;
+  margin-left: 4px;
+}
+
+.qc-batch-logs-content {
+  padding: 12px 16px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: #1e293b;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.log-item {
+  display: flex;
+  margin-bottom: 4px;
+}
+
+.log-item:last-child {
+  margin-bottom: 0;
+}
+
+.log-time {
+  color: #64748b;
+  margin-right: 12px;
+  min-width: 60px;
+}
+
+.log-message {
+  color: #e2e8f0;
+  word-break: break-all;
+}
+
+.log-item.error .log-message {
+  color: #f87171;
+}
+
+.log-item.error .log-time {
+  color: #f87171;
 }
 
 /* Form card */

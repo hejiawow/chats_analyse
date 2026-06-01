@@ -14,7 +14,8 @@ from pydantic import BaseModel, Field
 
 from app.models.database import init_db, async_engine
 from app.api import query, referral_query, case_query, script_lib, rag_query, sales_journey_query, follow_up_query, auth, users, roles, quality_check_query, keyword_config, logs
-from app.tasks.analysis import run_analysis, get_task_logs, clear_task_logs, is_task_done
+from app.tasks.analysis import run_analysis
+from app.services.log_service import get_task_logs, clear_task_logs, is_task_done
 from app.models.result import SalesJourneyResult  # ensure table creation
 from app.services.hujing_api import (
     resolve_user_id_by_name,
