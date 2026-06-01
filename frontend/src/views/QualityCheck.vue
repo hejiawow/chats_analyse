@@ -224,8 +224,8 @@ const batchProgress = reactive({ completed: 0, total: 0, status: '', risk_detect
 const batchTaskId = ref('')
 const batchLogs = ref([])
 let batchPollInterval = null
-let pollFailCount = 0
-const MAX_POLL_FAILS = 10
+let consecutivePollErrors = 0
+const MAX_POLL_ERRORS = 5
 const logsContentRef = ref(null)
 
 // History
@@ -344,6 +344,7 @@ function formatChatTime(time) {
 // === Batch mode functions ===
 
 async function startBatchPolling(taskId) {
+  consecutivePollErrors = 0
   batchPollInterval = setInterval(async () => {
     try {
       // 并行获取进度和日志（互不干扰）
@@ -351,6 +352,7 @@ async function startBatchPolling(taskId) {
         getBatchProgress(taskId),
         getLogs(taskId)
       ])
+      consecutivePollErrors = 0
 
       // 更新进度（即使日志获取失败也继续）
       if (progressRes.status === 'fulfilled') {
@@ -375,7 +377,7 @@ async function startBatchPolling(taskId) {
         })
       }
 
-      pollFailCount = 0
+      consecutivePollErrors = 0
 
       // 检查是否需要停止轮询
       const progress = progressRes.status === 'fulfilled' ? progressRes.value : {}
@@ -396,13 +398,13 @@ async function startBatchPolling(taskId) {
         }
       }
     } catch (err) {
-      pollFailCount++
+      consecutivePollErrors++
       console.error('Polling error:', err)
-      if (pollFailCount >= MAX_POLL_FAILS) {
+      if (consecutivePollErrors >= MAX_POLL_ERRORS) {
         clearInterval(batchPollInterval)
         batchPollInterval = null
         submitting.value = false
-        message.error('连接超时，请刷新页面重试')
+        message.error('获取任务进度失败，请刷新页面重试')
       }
     }
   }, 2000)

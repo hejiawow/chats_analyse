@@ -16,6 +16,7 @@ from app.api.quality_check_query import invalidate_quality_check_stats_cache
 from app.services.cache import cache_clear_pattern
 from app.services.log_service import log as _log, LOGS_KEY_PREFIX
 
+
 logger = logging.getLogger(__name__)
 
 import redis
@@ -25,19 +26,14 @@ redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 BATCH_PROGRESS_KEY_PREFIX = "batch:progress:"
 BATCH_ERRORS_KEY_PREFIX = "batch:errors:"
 BATCH_CANCEL_KEY_PREFIX = "batch:cancel:"
-LOGS_KEY_PREFIX = "task:logs:"
 
-
-# === 日志记录函数 ===
-
-def _log(task_id: str, message: str, level: str = "info"):
-    """向指定任务的日志列表追加一条日志（写入 Redis）"""
-    log_entry = json.dumps({
-        "time": datetime.now().strftime("%H:%M:%S"),
-        "level": level,
-        "message": message,
-    })
-    redis_client.rpush(f"{LOGS_KEY_PREFIX}{task_id}", log_entry)
+# 批量任务状态枚举
+# - running: 执行中
+# - cancelling: 取消中
+# - cancelled: 已取消
+# - completed: 已完成
+# - error: API 连接失败
+# - no_sales / no_friends / no_pairs / no_messages / no_matches: 无数据（终止态）
 
 
 # === 姓名获取辅助函数 ===
@@ -430,6 +426,8 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
             "risk_category": result.get("risk_category"),
         }
 
+    except (KeyboardInterrupt, SystemExit):
+        raise
     except Exception as e:
         _log(batch_task_id, f"[错误] 销售:{user_id} 好友:{friend_id} 分析失败: {str(e)}", "error")
         increment_batch_progress(batch_task_id)
@@ -439,6 +437,7 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
             "user_id": user_id,
             "friend_id": friend_id,
             "error": str(e),
+            "error_type": type(e).__name__,
         }
 
 
@@ -449,9 +448,12 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
 
     流程：
     1. 获取时间范围内所有聊天记录
-    2. 对每条聊天记录进行关键词匹配
-    3. 提取匹配到的销售ID和好友ID，去重
-    4. 对去重后的销售-好友对进行质检分析
+    2. 获取启用的关键词列表
+    3. 对每条聊天记录进行关键词匹配，提取匹配的销售-好友对
+    4. 限制分析数量
+    5. 初始化批量任务进度
+    6. 创建 Celery 子任务列表
+    7. 使用 chord 分发子任务，完成后触发回调
 
     Args:
         batch_task_id: 批量任务ID
@@ -461,11 +463,11 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
         limit: 最大分析数量
 
     Returns:
-        dict: 包含 status 字段，可能值：
-            - "started": 子任务已分发
-            - "no_messages": 时间范围内无聊天记录
-            - "no_matches": 未匹配到任何关键词
-            - "error": API 连接失败（含 error_message 字段）
+        dict: 可能的返回值:
+            - {"status": "error", "error_message": ...} — API连接失败
+            - {"status": "no_messages", "message": ...} — 无聊天记录
+            - {"status": "no_matches", "message": ...} — 无匹配关键词
+            - {"status": "started", "total_pairs": ..., "message": ...} — 正常启动
     """
     from app.agents.quality_check import _get_active_keywords, _detect_keywords
 
@@ -524,7 +526,7 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
 
     _log(batch_task_id, f"[关键词] 已加载 {len(keywords)} 个风险关键词", "info")
 
-    # 3. 对每条聊天记录进行关键词匹配，提取匹配的销售-好友对（可选按销售ID筛选）
+    # 3. 对每条聊天记录进行关键词匹配，提取匹配的销售-好友对
     _log(batch_task_id, "[匹配] 正在进行关键词匹配...", "info")
     matched_pairs = set()
     keyword_set = {kw["keyword"].lower() for kw in keywords}
@@ -561,33 +563,19 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
 
     _log(batch_task_id, f"[匹配] 发现 {len(matched_pairs)} 个匹配关键词的销售-好友对", "info")
 
-    # 4. 协议退费过滤（新增步骤）
-    _log(batch_task_id, "[过滤] 正在检查协议退费触发模式...", "info")
-    from app.services.refund_filter import filter_matched_pairs
-
-    filtered_pairs = filter_matched_pairs(matched_pairs, start_time, end_time, batch_task_id, _log)
-
-    filtered_count = len(matched_pairs) - len(filtered_pairs)
-    if filtered_count > 0:
-        _log(batch_task_id, f"[过滤] 过滤掉 {filtered_count} 个协议退费触发的聊天对", "info")
-
-    matched_pairs = filtered_pairs
-
-    # 5. 限制数量
+    # 4. 限制数量
     matched_pairs = matched_pairs[:limit]
 
     if not matched_pairs:
         _log(batch_task_id, "[完成] 过滤后无待分析的销售-好友对", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_matches")
-        return {"status": "no_matches", "message": "过滤后无待分析的销售-好友对", "total_pairs": 0, "filtered_count": filtered_count}
+        return {"status": "no_matches", "message": "过滤后无待分析的销售-好友对", "total_pairs": 0}
 
-    _log(batch_task_id, f"[分发] 开始分发 {len(matched_pairs)} 个子任务...", "info")
-
-    # 6. 初始化进度
+    # 5. 初始化进度
     update_batch_progress(batch_task_id, 0, len(matched_pairs), "running")
     _log(batch_task_id, f"[分发] 开始分发 {len(matched_pairs)} 个子任务...", "info")
 
-    # 7. 创建子任务列表
+    # 6. 创建子任务列表
     subtasks = [
         run_single_check_for_matched_pair.s(
             batch_task_id,
@@ -599,13 +587,12 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
         for pair in matched_pairs
     ]
 
-    # 8. 使用 chord：子任务完成后自动触发回调
+    # 7. 使用 chord：子任务完成后自动触发回调
     callback = on_batch_complete.s(batch_task_id)
     chord(subtasks)(callback)
 
     return {
         "status": "started",
         "total_pairs": len(matched_pairs),
-        "filtered_count": filtered_count,
-        "message": f"发现 {len(matched_pairs)} 个匹配关键词的销售-好友对（过滤掉 {filtered_count} 个协议退费）",
+        "message": f"发现 {len(matched_pairs)} 个匹配关键词的销售-好友对",
     }
