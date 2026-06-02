@@ -8,12 +8,23 @@
       </div>
       <a-menu
         v-model:selectedKeys="selectedKeys"
+        v-model:openKeys="openKeys"
         theme="dark"
         mode="inline"
         @click="handleMenuClick"
       >
         <template v-for="item in visibleMenuItems" :key="item.key">
           <a-menu-divider v-if="item.isDivider" />
+          <a-sub-menu v-else-if="item.children" :key="item.key">
+            <template #title>
+              <component :is="item.icon" />
+              <span>{{ item.label }}</span>
+            </template>
+            <a-menu-item v-for="child in item.children" :key="child.key">
+              <component :is="child.icon" />
+              <span>{{ child.label }}</span>
+            </a-menu-item>
+          </a-sub-menu>
           <a-menu-item v-else :key="item.key">
             <component :is="item.icon" />
             <span>{{ item.label }}</span>
@@ -60,6 +71,7 @@ import {
   UserOutlined,
   TeamOutlined,
   AuditOutlined,
+  KeyOutlined,
 } from '@ant-design/icons-vue'
 
 const router = useRouter()
@@ -67,13 +79,24 @@ const route = useRoute()
 const authStore = useAuthStore()
 const collapsed = ref(false)
 const selectedKeys = ref([route.name || 'Dashboard'])
+const openKeys = ref([])
 const currentTime = ref('')
 
 const allMenuItems = [
   { key: 'Dashboard', label: '工作台', icon: DashboardOutlined, permission: 'read:dashboard' },
   { key: 'Trigger', label: '触发分析', icon: ThunderboltOutlined, permission: 'write:trigger' },
-  { key: 'QualityCheck', label: '质检分析', icon: SafetyOutlined, permission: 'write:quality_check' },
-  { key: 'QualityResults', label: '质检结果', icon: FileSearchOutlined, permission: 'read:quality_check' },
+  {
+    key: 'Quality',
+    label: '质检',
+    icon: SafetyOutlined,
+    permission: 'read:quality_check',
+    children: [
+      { key: 'QualityCheck', label: '质检分析', icon: SafetyOutlined, permission: 'write:quality_check' },
+      { key: 'QualityResults', label: '质检结果', icon: FileSearchOutlined, permission: 'read:quality_check' },
+      { key: 'Keywords', label: '关键词管理', icon: KeyOutlined, permission: 'admin:keywords' },
+      { key: 'Whitelist', label: '协议话术白名单', icon: SafetyOutlined, permission: 'admin:whitelist' },
+    ]
+  },
   { key: 'Referral', label: '转介绍检测', icon: ShareAltOutlined, permission: 'read:referral' },
   { key: 'Cases', label: '优秀话术提取', icon: FileTextOutlined, permission: 'read:cases' },
   { key: 'Success', label: '成功案例', icon: TrophyOutlined, permission: 'read:journey' },
@@ -87,17 +110,66 @@ const allMenuItems = [
   { key: 'Logs', label: '日志管理', icon: AuditOutlined, permission: 'admin:logs' },
 ]
 
+// 查找当前路由所属的父菜单
+function findParentKey(routeName) {
+  for (const item of allMenuItems) {
+    if (item.children) {
+      for (const child of item.children) {
+        if (child.key === routeName) {
+          return item.key
+        }
+      }
+    }
+  }
+  return null
+}
+
+// 初始化openKeys：如果当前路由是子菜单项，展开父菜单
+const parentKey = findParentKey(route.name)
+if (parentKey) {
+  openKeys.value = [parentKey]
+}
+
 const visibleMenuItems = computed(() => {
   return allMenuItems.filter(item => {
     if (item.isDivider) return true
     if (!item.permission) return true
+    // 子菜单：检查是否有任意子项有权限
+    if (item.children) {
+      return item.children.some(child => {
+        if (!child.permission) return true
+        return authStore.hasPermission(child.permission)
+      })
+    }
     return authStore.hasPermission(item.permission)
+  }).map(item => {
+    // 过滤子菜单中有权限的子项
+    if (item.children) {
+      return {
+        ...item,
+        children: item.children.filter(child => {
+          if (!child.permission) return true
+          return authStore.hasPermission(child.permission)
+        })
+      }
+    }
+    return item
   })
 })
 
 const pageTitle = computed(() => {
-  const item = allMenuItems.find(i => i.key === route.name)
-  return item ? item.label : ''
+  // 先在顶层菜单中查找
+  const topLevelItem = allMenuItems.find(i => i.key === route.name)
+  if (topLevelItem) return topLevelItem.label
+
+  // 在子菜单中查找
+  for (const item of allMenuItems) {
+    if (item.children) {
+      const childItem = item.children.find(c => c.key === route.name)
+      if (childItem) return childItem.label
+    }
+  }
+  return ''
 })
 
 function handleMenuClick({ key }) {
@@ -116,6 +188,11 @@ watch(
   () => route.name,
   (name) => {
     if (name) selectedKeys.value = [name]
+    // 如果是子菜单项，展开父菜单
+    const parent = findParentKey(name)
+    if (parent && !openKeys.value.includes(parent)) {
+      openKeys.value = [parent]
+    }
   }
 )
 
