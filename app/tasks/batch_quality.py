@@ -7,7 +7,7 @@ from celery import chord
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
-from app.services.hujing_api import get_chat_pairs, get_chat_records, get_all_chat_messages, get_all_sales, get_friends_list
+from app.services.hujing_api import get_chat_pairs, get_chat_records, get_all_chat_messages, get_all_sales, get_friends_list, get_chat_records_for_quality_check
 from app.agents.quality_check import quality_check_agent
 from app.models.database import sync_engine
 from app.models.result import QualityCheckResult
@@ -177,8 +177,15 @@ def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: in
         }
 
     try:
-        # 获取聊天记录
-        chat_records = get_chat_records(user_id, friend_id, start_time, end_time)
+        # 计算实际使用的时间范围（基于配置项）
+        from datetime import datetime as dt
+        from datetime import timedelta as td
+        end_dt = dt.strptime(end_time, "%Y-%m-%d %H:%M:%S")
+        start_dt = end_dt - td(days=settings.QUALITY_CHECK_CHAT_DAYS)
+        actual_start_time = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        # 获取聊天记录（使用配置项）
+        chat_records = get_chat_records_for_quality_check(user_id, friend_id, end_time)
 
         if not chat_records:
             increment_batch_progress(batch_task_id)
@@ -189,10 +196,10 @@ def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: in
                 "keyword_detected": "no",
             }
 
-        # 执行质检分析
+        # 执行质检分析（使用实际的时间范围）
         result = quality_check_agent(
             user_id, friend_id, chat_records,
-            start_time=start_time,
+            start_time=actual_start_time,
             end_time=end_time,
         )
 
@@ -210,7 +217,7 @@ def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: in
                     alias=friend_info.get("alias"),
                     phone=friend_info.get("phone"),
                     remark_phone=friend_info.get("remark_phone"),
-                    check_time_start=start_time,
+                    check_time_start=actual_start_time,
                     check_time_end=end_time,
                     chat_record_count=result.get("chat_record_count", len(chat_records)),
                     keyword_detected=result.get("keyword_detected", "no"),
@@ -218,6 +225,7 @@ def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: in
                     keyword_matches=result.get("keyword_matches"),
                     risk_level=result.get("risk_level"),
                     risk_category=result.get("risk_category"),
+                    trigger_party=result.get("trigger_party"),
                     risk_description=result.get("risk_description"),
                     suggested_action=result.get("suggested_action"),
                     key_evidence=result.get("key_evidence"),
@@ -363,9 +371,16 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
     _log(batch_task_id, f"[开始] 销售:{user_id} 好友:{friend_id} 开始分析", "info")
 
     try:
-        # 获取完整聊天记录
+        # 计算实际使用的时间范围（基于配置项）
+        from datetime import datetime as dt
+        from datetime import timedelta as td
+        end_dt = dt.strptime(end_time, "%Y-%m-%d %H:%M:%S")
+        start_dt = end_dt - td(days=settings.QUALITY_CHECK_CHAT_DAYS)
+        actual_start_time = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        # 获取完整聊天记录（使用配置项）
         _log(batch_task_id, f"[获取] 销售:{user_id} 好友:{friend_id} 正在获取聊天记录...", "info")
-        chat_records = get_chat_records(user_id, friend_id, start_time, end_time)
+        chat_records = get_chat_records_for_quality_check(user_id, friend_id, end_time)
 
         if not chat_records:
             _log(batch_task_id, f"[无数据] 销售:{user_id} 好友:{friend_id} 无聊天记录", "info")
@@ -379,10 +394,10 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
 
         _log(batch_task_id, f"[分析] 销售:{user_id} 好友:{friend_id} 获取到 {len(chat_records)} 条记录，开始质检...", "info")
 
-        # 执行质检分析
+        # 执行质检分析（使用实际的时间范围）
         result = quality_check_agent(
             user_id, friend_id, chat_records,
-            start_time=start_time,
+            start_time=actual_start_time,
             end_time=end_time,
         )
 
@@ -401,7 +416,7 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
                     alias=friend_info.get("alias"),
                     phone=friend_info.get("phone"),
                     remark_phone=friend_info.get("remark_phone"),
-                    check_time_start=start_time,
+                    check_time_start=actual_start_time,
                     check_time_end=end_time,
                     chat_record_count=result.get("chat_record_count", len(chat_records)),
                     keyword_detected=result.get("keyword_detected", "no"),
@@ -409,6 +424,7 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
                     keyword_matches=result.get("keyword_matches"),
                     risk_level=result.get("risk_level"),
                     risk_category=result.get("risk_category"),
+                    trigger_party=result.get("trigger_party"),
                     risk_description=result.get("risk_description"),
                     suggested_action=result.get("suggested_action"),
                     key_evidence=result.get("key_evidence"),

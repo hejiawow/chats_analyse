@@ -15,9 +15,9 @@ from config import settings
 from app.services.cache import cache_get, cache_set, cache_clear_pattern
 
 # 缓存过期时间（秒）
-_SALES_CACHE_TTL = 21600       # 销售列表：6 小时
-_FRIENDS_CACHE_TTL = 21600     # 好友列表：6 小时
-_DEPARTMENT_CACHE_TTL = 3600   # 组织架构：1 小时
+_SALES_CACHE_TTL = 21600  # 销售列表：6 小时
+_FRIENDS_CACHE_TTL = 21600  # 好友列表：6 小时
+_DEPARTMENT_CACHE_TTL = 3600  # 组织架构：1 小时
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +94,53 @@ def get_chat_records(user_id: str, friend_id: int, start_time: str = "2000-01-01
             break
 
     return sorted(all_chats, key=lambda x: x.get("key", 0))
+
+
+def get_chat_records_for_quality_check(
+        user_id: str,
+        friend_id: int,
+        end_time: str,
+        chat_days: int = None,
+        max_records: int = None
+) -> list:
+    """获取质检检测专用的聊天记录（自动计算时间范围 + 条数限制）
+
+    Args:
+        user_id: 销售ID
+        friend_id: 好友ID
+        end_time: 质检结束时间，格式 "YYYY-MM-DD HH:MM:SS"
+        chat_days: 往前查询天数，默认使用配置 QUALITY_CHECK_CHAT_DAYS
+        max_records: 最大聊天记录条数，默认使用配置 QUALITY_CHECK_MAX_CHAT_RECORDS
+
+    Returns:
+        按时间倒序排序的最新N条聊天记录
+    """
+    # 使用配置默认值
+    if chat_days is None:
+        chat_days = settings.QUALITY_CHECK_CHAT_DAYS
+    if max_records is None:
+        max_records = settings.QUALITY_CHECK_MAX_CHAT_RECORDS
+
+    # 计算时间范围：end_time 往前推 chat_days 天
+    end_dt = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
+    start_dt = end_dt - timedelta(days=chat_days)
+    start_time = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    logger.info(f"[质检聊天] user_id={user_id}, friend_id={friend_id}, "
+                f"时间范围: {start_time} ~ {end_time} (往前{chat_days}天)")
+
+    # 调用原有函数获取聊天记录
+    all_chats = get_chat_records(user_id, friend_id, start_time, end_time)
+
+    # 条数限制：按时间倒序排序，保留最新的 max_records 条
+    if len(all_chats) > max_records:
+        logger.info(f"[质检聊天] 获取 {len(all_chats)} 条，截取最新 {max_records} 条")
+        # get_chat_records 返回升序排序，从末尾截取最新的记录
+        all_chats = all_chats[-max_records:]
+    else:
+        logger.info(f"[质检聊天] 获取 {len(all_chats)} 条，无需截取")
+
+    return all_chats
 
 
 def get_all_sales(page: int = 1, page_size: int = 1000000) -> list:
@@ -430,20 +477,20 @@ def get_all_chat_messages(start_time: str, end_time: str, page_size: int = 10000
     headers = {
         "x-api-key": settings.HUJING_CHAT_API_KEY,
     }
-    
+
     all_messages = []
-    
+
     # 将字符串时间转换为 datetime 对象
     start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
     end_dt = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
-    
+
     # 计算总时间跨度
     total_duration = end_dt - start_dt
-    
+
     # 使用1.9天（约45.6小时）作为分段间隔，确保不会超过2天限制
     # 避免边界条件问题
     max_duration = timedelta(days=1.9)
-    
+
     # 强制分段，不依赖时间差判断
     segments = []
     current_start = start_dt
@@ -454,7 +501,7 @@ def get_all_chat_messages(start_time: str, end_time: str, page_size: int = 10000
         seg_end_str = current_end.strftime("%Y-%m-%d %H:%M:%S")
         segments.append((seg_start_str, seg_end_str))
         current_start = current_end
-    
+
     # 遍历每个时间段进行请求
     for seg_start, seg_end in segments:
         page = 1
@@ -470,19 +517,19 @@ def get_all_chat_messages(start_time: str, end_time: str, page_size: int = 10000
                 response = requests.get(url, headers=headers, params=params, timeout=60, verify=False)
                 response.raise_for_status()
                 result = response.json()
-                
+
                 data = result.get("data", [])
                 if not data:
                     break
-                
+
                 all_messages.extend(data)
-                
+
                 total = result.get("total", 0)
                 if len(all_messages) >= total:
                     break
-                
+
                 page += 1
-                
+
             except RequestException as e:
                 try:
                     response_text = response.text if 'response' in locals() else 'N/A'
