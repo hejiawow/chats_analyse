@@ -32,7 +32,7 @@ def get_db():
 @router.get("/refund-whitelist")
 async def get_whitelist_patterns(
     session: Session = Depends(get_db),
-    current_user: dict = Depends(require_permission("read:quality_check")),
+    current_user: dict = Depends(require_permission("admin:whitelist")),
 ):
     """获取所有协议话术白名单"""
     patterns = session.query(RefundWhitelistPattern).order_by(
@@ -45,7 +45,7 @@ async def get_whitelist_patterns(
 async def create_pattern(
     req: CreatePatternRequest,
     session: Session = Depends(get_db),
-    current_user: dict = Depends(require_permission("write:quality_check")),
+    current_user: dict = Depends(require_permission("admin:whitelist")),
 ):
     """新增协议话术"""
     # 检查是否已存在
@@ -73,7 +73,7 @@ async def update_pattern(
     id: int,
     req: UpdatePatternRequest,
     session: Session = Depends(get_db),
-    current_user: dict = Depends(require_permission("write:quality_check")),
+    current_user: dict = Depends(require_permission("admin:whitelist")),
 ):
     """修改协议话术"""
     pattern = session.query(RefundWhitelistPattern).filter(
@@ -110,7 +110,7 @@ async def update_pattern(
 async def delete_pattern(
     id: int,
     session: Session = Depends(get_db),
-    current_user: dict = Depends(require_permission("write:quality_check")),
+    current_user: dict = Depends(require_permission("admin:whitelist")),
 ):
     """删除协议话术"""
     pattern = session.query(RefundWhitelistPattern).filter(
@@ -129,7 +129,7 @@ async def delete_pattern(
 async def toggle_pattern(
     id: int,
     session: Session = Depends(get_db),
-    current_user: dict = Depends(require_permission("write:quality_check")),
+    current_user: dict = Depends(require_permission("admin:whitelist")),
 ):
     """启用/禁用协议话术"""
     pattern = session.query(RefundWhitelistPattern).filter(
