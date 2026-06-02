@@ -310,3 +310,25 @@ class QualityCheckResult(Base):
         Index("ix_quality_check_created_at", "created_at"),
         Index("ix_quality_check_user_created", "user_id", "created_at"),
     )
+
+
+class RefundWhitelistPattern(Base):
+    """协议退费话术白名单"""
+    __tablename__ = "refund_whitelist_patterns"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    pattern = Column(String(100), nullable=False, unique=True, comment="话术内容")
+    description = Column(String(200), nullable=True, comment="描述说明")
+    is_active = Column(Boolean, default=True, comment="是否启用")
+    created_at = Column(DateTime, default=lambda: datetime.now(), comment="创建时间")
+    updated_at = Column(DateTime, onupdate=lambda: datetime.now(), comment="更新时间")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "pattern": self.pattern,
+            "description": self.description,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
