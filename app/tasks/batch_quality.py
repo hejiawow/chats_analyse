@@ -35,6 +35,14 @@ BATCH_CANCEL_KEY_PREFIX = "batch:cancel:"
 # - error: API 连接失败
 # - no_sales / no_friends / no_pairs / no_messages / no_matches: 无数据（终止态）
 
+# 批量任务状态枚举
+# - running: 执行中
+# - cancelling: 取消中
+# - cancelled: 已取消
+# - completed: 已完成
+# - error: API 连接失败
+# - no_sales / no_friends / no_pairs / no_messages / no_matches: 无数据（终止态）
+
 
 # === 姓名获取辅助函数 ===
 
@@ -563,19 +571,34 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
 
     _log(batch_task_id, f"[匹配] 发现 {len(matched_pairs)} 个匹配关键词的销售-好友对", "info")
 
-    # 4. 限制数量
+    # 4. 协议退费过滤（新增步骤）
+    _log(batch_task_id, "[过滤] 正在检查协议退费触发模式...", "info")
+    from app.services.refund_filter import filter_matched_pairs
+
+    filtered_pairs = filter_matched_pairs(matched_pairs, start_time, end_time, batch_task_id, _log)
+
+    filtered_count = len(matched_pairs) - len(filtered_pairs)
+    if filtered_count > 0:
+        _log(batch_task_id, f"[过滤] 过滤掉 {filtered_count} 个协议退费触发的聊天对", "info")
+
+    matched_pairs = filtered_pairs
+
+    # 5. 限制数量
     matched_pairs = matched_pairs[:limit]
 
     if not matched_pairs:
         _log(batch_task_id, "[完成] 过滤后无待分析的销售-好友对", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_matches")
-        return {"status": "no_matches", "message": "过滤后无待分析的销售-好友对", "total_pairs": 0}
+        return {"status": "no_matches", "message": "过滤后无待分析的销售-好友对", "total_pairs": 0,
+                "filtered_count": filtered_count}
 
-    # 5. 初始化进度
+    _log(batch_task_id, f"[分发] 开始分发 {len(matched_pairs)} 个子任务...", "info")
+
+    # 6. 初始化进度
     update_batch_progress(batch_task_id, 0, len(matched_pairs), "running")
     _log(batch_task_id, f"[分发] 开始分发 {len(matched_pairs)} 个子任务...", "info")
 
-    # 6. 创建子任务列表
+    # 7. 创建子任务列表
     subtasks = [
         run_single_check_for_matched_pair.s(
             batch_task_id,
@@ -587,12 +610,13 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
         for pair in matched_pairs
     ]
 
-    # 7. 使用 chord：子任务完成后自动触发回调
+    # 8. 使用 chord：子任务完成后自动触发回调
     callback = on_batch_complete.s(batch_task_id)
     chord(subtasks)(callback)
 
     return {
         "status": "started",
         "total_pairs": len(matched_pairs),
-        "message": f"发现 {len(matched_pairs)} 个匹配关键词的销售-好友对",
+        "filtered_count": filtered_count,
+        "message": f"发现 {len(matched_pairs)} 个匹配关键词的销售-好友对（过滤掉 {filtered_count} 个协议退费）",
     }
