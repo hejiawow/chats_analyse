@@ -108,6 +108,7 @@ def _parse_ai_response(raw: str) -> dict:
     return {
         "risk_level": "unknown",
         "risk_category": "未知",
+        "trigger_party": None,
         "risk_description": "AI响应解析失败",
         "suggested_action": "请人工复核",
         "key_evidence": [],
@@ -155,6 +156,7 @@ def _ai_deep_analysis(chat_records: list, keyword_matches: list) -> dict:
     return {
         "risk_level": "unknown",
         "risk_category": "未知",
+        "trigger_party": None,
         "risk_description": f"AI分析失败: {last_error}",
         "suggested_action": "请人工复核",
         "key_evidence": [],
@@ -227,6 +229,7 @@ def quality_check_agent(
         base_result["status"] = "no_keyword"
         base_result["risk_level"] = "none"
         base_result["risk_category"] = "无风险"
+        base_result["trigger_party"] = None
         base_result["risk_description"] = "未检测到风险关键词"
         base_result["suggested_action"] = "无需处理"
         base_result["key_evidence"] = []
@@ -235,11 +238,18 @@ def quality_check_agent(
     # 步骤2: AI深度分析（仅当检测到关键词时执行）
     ai_result = _ai_deep_analysis(chat_records, keyword_result["keyword_matches"])
 
+    # 直接使用AI返回的trigger_party
+    trigger_party = ai_result.get("trigger_party")
+    # 校验trigger_party值是否合法
+    if trigger_party not in ("sales", "customer", "both", "none"):
+        trigger_party = None
+
     # 合并结果
     return {
         **base_result,
         "risk_level": ai_result.get("risk_level", "unknown"),
         "risk_category": ai_result.get("risk_category", "未知"),
+        "trigger_party": trigger_party,
         "risk_description": ai_result.get("risk_description", ""),
         "suggested_action": ai_result.get("suggested_action", ""),
         "key_evidence": ai_result.get("key_evidence", []),
