@@ -313,7 +313,7 @@ class QualityCheckResult(Base):
 
 
 class RefundWhitelistPattern(Base):
-    """协议退费话术白名单"""
+    """协议话术白名单表"""
     __tablename__ = "refund_whitelist_patterns"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
