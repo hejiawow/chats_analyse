@@ -47,15 +47,11 @@ async def query_quality_check_results(
     page_size: int = Query(20, ge=1, le=100),
     current_user: dict = Depends(require_permission("read:quality_check")),
 ):
-    """查询质检检测结果，支持筛选。非 admin 用户只能查看自己的数据。
+    """查询质检检测结果，支持筛选。
 
     时间筛选：按检测时间范围（check_time_start/check_time_end）筛选，
     筛选逻辑为检测时间范围与筛选时间范围有交集。
     """
-    # 非 admin 用户自动过滤到当前用户的 user_id
-    if "admin:all" not in current_user.get("permissions", []):
-        user_id = str(current_user["user_id"])
-
     async with async_session() as session:
         stmt = select(QualityCheckResult)
         if user_id:
@@ -116,20 +112,15 @@ async def get_quality_check_stats(
     时间筛选：按检测时间范围（check_time_start/check_time_end）筛选
     注意：风险等级筛选不影响统计，只影响表格
     """
-    # 权限控制：非 admin 用户只能查看自己的数据
-    user_id_filter = None
-    if "admin:all" not in current_user.get("permissions", []):
-        user_id_filter = str(current_user["user_id"])
-    elif user_id:
-        # admin 用户可以指定查看特定用户
-        user_id_filter = user_id
+    # 筛选条件
+    user_id_filter = user_id if user_id else None
 
     # 判断是否有筛选条件（影响缓存策略）
     has_filters = user_id_filter or friend_id or keyword or start_time or end_time
 
     # 缓存策略：无筛选条件时使用缓存，有筛选条件时不缓存
     cache_key = _STATS_CACHE_KEY
-    if user_id_filter and "admin:all" in current_user.get("permissions", []):
+    if user_id_filter:
         cache_key = f"{_STATS_CACHE_KEY}:user:{user_id_filter}"
 
     # 只有无任何筛选条件时才使用缓存
@@ -224,10 +215,6 @@ async def export_quality_check_results(
 
     时间筛选：按检测时间范围（check_time_start/check_time_end）筛选
     """
-    # 非 admin 用户自动过滤
-    if "admin:all" not in current_user.get("permissions", []):
-        user_id = str(current_user["user_id"])
-
     # 构建检测时间范围筛选条件
     time_filter = _build_time_filter(start_time, end_time)
 
@@ -306,11 +293,6 @@ async def get_quality_check_chat_records(
         if not record:
             return {"error": "记录不存在"}
 
-        # 非 admin 用户只能查看自己的数据
-        if "admin:all" not in current_user.get("permissions", []):
-            if record.user_id != str(current_user["user_id"]):
-                return {"error": "无权查看此记录"}
-
         # 打印调试信息
         print(f"[DEBUG] get_chat_records params: user_id={record.user_id}, friend_id={record.friend_id}, start={record.check_time_start}, end={record.check_time_end}")
 
@@ -347,11 +329,6 @@ async def get_quality_check_detail(
 
         if not record:
             return {"error": "记录不存在"}
-
-        # 非 admin 用户只能查看自己的数据
-        if "admin:all" not in current_user.get("permissions", []):
-            if record.user_id != str(current_user["user_id"]):
-                return {"error": "无权查看此记录"}
 
         return record.to_dict()
 
