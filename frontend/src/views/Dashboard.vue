@@ -49,8 +49,8 @@
       </a-descriptions>
     </a-card>
 
-    <!-- Recent records -->
-    <a-card :bordered="false" title="最近分析记录">
+    <!-- Recent records (only shown with referral permission) -->
+    <a-card v-if="authStore.hasPermission('read:referral')" :bordered="false" title="最近分析记录">
       <a-table
         :columns="columns"
         :data-source="recentData"
@@ -101,6 +101,7 @@ import { ref, onMounted } from 'vue'
 import { getStats } from '@/api/stats'
 import { getReferralList, getReferralDetail } from '@/api/referral'
 import { formatTime } from '@/utils/format'
+import { useAuthStore } from '@/store/auth'
 import {
   ThunderboltOutlined,
   ShareAltOutlined,
@@ -109,6 +110,7 @@ import {
   RobotOutlined,
 } from '@ant-design/icons-vue'
 
+const authStore = useAuthStore()
 const stats = ref({})
 const recentData = ref([])
 const loading = ref(false)
@@ -127,7 +129,11 @@ const columns = [
 onMounted(async () => {
   try {
     stats.value = await getStats()
-    loading.value = true
+  } catch {}
+
+  if (!authStore.hasPermission('read:referral')) return
+  loading.value = true
+  try {
     const data = await getReferralList({ page: 1, page_size: 5 })
     recentData.value = data.data || []
   } catch {

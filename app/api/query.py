@@ -1,17 +1,20 @@
 # -*- coding: utf-8 -*-
 """查询分析结果 API — 统一统计"""
 from datetime import datetime
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 
 from app.models.database import async_session
 from app.models.result import ReferralResult, CaseExtractionResult, SalesJourneyResult, FollowUpComplianceResult
+from app.services.dependencies import require_permission
 
 router = APIRouter()
 
 
 @router.get("/stats")
-async def get_stats():
+async def get_stats(
+    current_user: dict = Depends(require_permission("read:dashboard")),
+):
     """获取工作台统计信息"""
     today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 

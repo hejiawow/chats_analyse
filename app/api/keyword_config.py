@@ -15,7 +15,7 @@ router = APIRouter()
 
 @router.get("/keywords/active")
 async def list_active_keywords(
-    current_user: dict = Depends(require_permission("read:referral")),
+    current_user: dict = Depends(require_permission("read:quality_check")),
 ):
     """获取启用的关键词列表（用于筛选下拉框）"""
     async with async_session() as session:
