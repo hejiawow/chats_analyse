@@ -356,6 +356,8 @@ def run_analysis(self, task_id: str, user_id: str, friend_id: int,
                         suggested_action=result.get("suggested_action"),
                         key_evidence=result.get("key_evidence"),
                         raw_response=result.get("raw_response"),
+                        voice_transcribed_count=result.get("voice_transcribed_count", 0),
+                        voice_transcribe_error_count=result.get("voice_transcribe_error_count", 0),
                         status=result.get("status", "success"),
                         created_at=datetime.now(),
                     )

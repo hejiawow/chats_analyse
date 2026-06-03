@@ -266,6 +266,10 @@ class QualityCheckResult(Base):
     # === 原始数据 ===
     raw_response = Column(Text, nullable=True, comment="AI原始响应")
 
+    # === 语音转写统计 ===
+    voice_transcribed_count = Column(Integer, default=0, comment="成功转写的语音消息数量")
+    voice_transcribe_error_count = Column(Integer, default=0, comment="转写失败的语音消息数量")
+
     # === 状态 ===
     status = Column(String(16), default="success", comment="success/failed/no_chat/no_keyword")
     error_msg = Column(Text, nullable=True, comment="失败原因")
@@ -299,6 +303,8 @@ class QualityCheckResult(Base):
             "suggested_action": self.suggested_action,
             "key_evidence": self.key_evidence,
             "raw_response": self.raw_response,
+            "voice_transcribed_count": self.voice_transcribed_count,
+            "voice_transcribe_error_count": self.voice_transcribe_error_count,
             "status": self.status,
             "error_msg": self.error_msg,
             "batch_task_id": self.batch_task_id,
