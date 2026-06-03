@@ -271,14 +271,6 @@ class QualityCheckResult(Base):
     error_msg = Column(Text, nullable=True, comment="失败原因")
     batch_task_id = Column(String(64), nullable=True, comment="批量任务ID")
     trigger_party = Column(String(16), nullable=True, comment="触发方：sales/customer/both")
-
-    # === 人工修正字段 ===
-    remark = Column(Text, nullable=True, comment="质检备注")
-    modified_risk_level = Column(String(16), nullable=True, comment="人工修正的风险等级")
-    modified_at = Column(DateTime, nullable=True, comment="最后修改时间")
-    modified_by = Column(String(64), nullable=True, comment="最后修改人ID")
-    modified_by_name = Column(String(64), nullable=True, comment="最后修改人姓名")
-
     created_at = Column(DateTime, default=lambda: datetime.now(), comment="创建时间")
 
     def to_dict(self) -> dict:
@@ -311,13 +303,6 @@ class QualityCheckResult(Base):
             "error_msg": self.error_msg,
             "batch_task_id": self.batch_task_id,
             "trigger_party": self.trigger_party,
-            "remark": self.remark,
-            "modified_risk_level": self.modified_risk_level,
-            "modified_at": self.modified_at.isoformat() if self.modified_at else None,
-            "modified_by": self.modified_by,
-            "modified_by_name": self.modified_by_name,
-            # 显示的风险等级（优先使用修正后的）
-            "display_risk_level": self.modified_risk_level or self.risk_level,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -349,35 +334,4 @@ class RefundWhitelistPattern(Base):
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
-
-
-class QualityCheckModificationLog(Base):
-    """质检结果修改日志表 — 审计追踪"""
-    __tablename__ = "quality_check_modification_logs"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    result_id = Column(Integer, nullable=False, comment="质检结果ID")
-    user_id = Column(String(64), nullable=False, comment="修改人ID")
-    user_name = Column(String(64), nullable=True, comment="修改人姓名")
-
-    # 修改内容
-    old_risk_level = Column(String(16), nullable=True, comment="原风险等级")
-    new_risk_level = Column(String(16), nullable=True, comment="新风险等级")
-    old_remark = Column(Text, nullable=True, comment="原备注")
-    new_remark = Column(Text, nullable=True, comment="新备注")
-
-    modified_at = Column(DateTime, default=lambda: datetime.now(), comment="修改时间")
-
-    def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "result_id": self.result_id,
-            "user_id": self.user_id,
-            "user_name": self.user_name,
-            "old_risk_level": self.old_risk_level,
-            "new_risk_level": self.new_risk_level,
-            "old_remark": self.old_remark,
-            "new_remark": self.new_remark,
-            "modified_at": self.modified_at.isoformat() if self.modified_at else None,
         }

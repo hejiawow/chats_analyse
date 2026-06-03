@@ -31,7 +31,7 @@ def init_roles_and_users():
             ("manager", "主管，可查看和触发分析", [
                 "read:dashboard", "read:referral", "read:cases",
                 "read:journey", "read:followup", "read:scriptlib", "read:rag",
-                "read:quality_check", "update:quality_check",
+                "read:quality_check", "write:quality_check",
                 "write:trigger",
             ]),
             ("sales", "销售，仅可查看自己的数据和触发分析", [
