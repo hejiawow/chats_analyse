@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str = ""
     DATABASE_URL_SYNC: str = ""
 
+    # Quality Check
+    QUALITY_CHECK_CHAT_DAYS: int = 7
+    QUALITY_CHECK_MAX_CHAT_RECORDS: int = 500
+
     # JWT
     JWT_SECRET_KEY: str = ""
 

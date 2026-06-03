@@ -52,7 +52,20 @@
       <a-form-item label="风险等级">
         <a-checkbox-group v-model:value="filters.risk_levels" :options="riskLevelOptions" />
       </a-form-item>
-            <a-form-item>
+<!--             <a-form-item> -->
+      <a-form-item label="关键词">
+        <a-select v-model:value="filters.keyword" placeholder="全部" style="width: 120px" allowClear showSearch>
+          <a-select-option v-for="kw in keywordOptions" :key="kw" :value="kw">{{ kw }}</a-select-option>
+        </a-select>
+      </a-form-item>
+      <a-form-item label="触发方">
+        <a-select v-model:value="filters.trigger_party" placeholder="全部" style="width: 120px" allowClear>
+          <a-select-option value="sales">销售触发</a-select-option>
+          <a-select-option value="customer">客户触发</a-select-option>
+          <a-select-option value="both">双方触发</a-select-option>
+        </a-select>
+      </a-form-item>
+      <a-form-item>
         <a-button type="primary" @click="handleSearch">查询</a-button>
         <a-button style="margin-left: 8px" @click="handleReset">重置</a-button>
         <a-button style="margin-left: 8px" @click="handleExport">导出 CSV</a-button>
@@ -114,6 +127,11 @@
         <template v-if="column.key === 'risk_level'">
           <a-tag :color="getRiskColor(record.risk_level)">{{ getRiskText(record.risk_level) }}</a-tag>
         </template>
+        <template v-if="column.key === 'trigger_party'">
+          <a-tag :color="getTriggerPartyColor(record.trigger_party)">
+            {{ getTriggerPartyText(record.trigger_party) }}
+          </a-tag>
+        </template>
         <template v-if="column.key === 'detected_keywords'">
           <span :title="record.detected_keywords">{{ record.detected_keywords || '无' }}</span>
         </template>
@@ -152,6 +170,11 @@
         </a-descriptions-item>
         <a-descriptions-item v-if="detailData.risk_level" label="风险等级">
           <a-tag :color="getRiskColor(detailData.risk_level)">{{ getRiskText(detailData.risk_level) }}</a-tag>
+        </a-descriptions-item>
+        <a-descriptions-item v-if="detailData.trigger_party" label="触发方">
+          <a-tag :color="getTriggerPartyColor(detailData.trigger_party)">
+            {{ getTriggerPartyText(detailData.trigger_party) }}
+          </a-tag>
         </a-descriptions-item>
         <a-descriptions-item v-if="detailData.risk_category" label="风险类别">{{ detailData.risk_category }}</a-descriptions-item>
         <a-descriptions-item label="风险描述">
@@ -237,6 +260,7 @@ const filters = reactive({
   friend_id: '',
   risk_levels: [],   // 风险等级数组
   keywords: [],      // 关键词数组
+  trigger_party: undefined,
   timeRange: null
 })
 
@@ -250,6 +274,7 @@ const riskLevelOptions = [
   { label: '低风险', value: 'low' },
   { label: '无风险', value: 'none' }
 ]
+// const filters = reactive({ user_id: '', friend_id: '', risk_level: null, keyword: '', trigger_party: undefined, timeRange: null })
 
 // 表格
 const data = ref([])
@@ -272,6 +297,7 @@ const columns = [
   { title: '绑定手机号', dataIndex: 'phone', key: 'phone', minWidth: 130, ellipsis: true },
   { title: '备注手机号', dataIndex: 'remark_phone', key: 'remark_phone', minWidth: 130, ellipsis: true },
   { title: '风险等级', key: 'risk_level', minWidth: 100 },
+  { title: '触发方', dataIndex: 'trigger_party', key: 'trigger_party', width: 100 },
   { title: '检测关键词', key: 'detected_keywords', minWidth: 150, ellipsis: true },
   { title: '风险描述', key: 'risk_description', ellipsis: true }, // 无宽度，自适应
   { title: '风险类别', dataIndex: 'risk_category', key: 'risk_category', minWidth: 100 },
@@ -314,6 +340,24 @@ function formatDateTime(isoString) {
   } catch {
     return isoString
   }
+// 触发方颜色映射
+const getTriggerPartyColor = (trigger_party) => {
+  const colorMap = {
+    'sales': 'blue',
+    'customer': 'orange',
+    'both': 'purple',
+  }
+  return colorMap[trigger_party] || 'default'
+}
+
+// 触发方文本映射
+const getTriggerPartyText = (trigger_party) => {
+  const textMap = {
+    'sales': '销售',
+    'customer': '客户',
+    'both': '双方',
+  }
+  return textMap[trigger_party] || '无'
 }
 
 // 加载统计（响应筛选条件，但不包括风险等级）
@@ -323,6 +367,7 @@ async function loadStats() {
     if (filters.user_id) params.user_id = filters.user_id
     if (filters.friend_id) params.friend_id = filters.friend_id
     if (filters.keyword) params.keyword = filters.keyword
+    if (filters.trigger_party) params.trigger_party = filters.trigger_party
     if (filters.timeRange && filters.timeRange.length === 2) {
       params.start_time = filters.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
       params.end_time = filters.timeRange[1].format('YYYY-MM-DD HH:mm:ss')
@@ -435,6 +480,9 @@ async function loadData() {
     if (filters.friend_id) params.friend_id = filters.friend_id
     if (filters.risk_levels && filters.risk_levels.length > 0) params.risk_levels = filters.risk_levels
     if (filters.keywords && filters.keywords.length > 0) params.keywords = filters.keywords
+//     if (filters.risk_level) params.risk_level = filters.risk_level
+//     if (filters.keyword) params.keyword = filters.keyword
+    if (filters.trigger_party) params.trigger_party = filters.trigger_party
     if (filters.timeRange && filters.timeRange.length === 2) {
       params.start_time = filters.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
       params.end_time = filters.timeRange[1].format('YYYY-MM-DD HH:mm:ss')
@@ -462,6 +510,9 @@ function handleReset() {
   filters.friend_id = ''
   filters.risk_levels = []
   filters.keywords = []
+//   filters.risk_level = null
+//   filters.keyword = ''
+  filters.trigger_party = undefined
   filters.timeRange = null
   keywordsCollapseActive.value = []  // 折叠关键词面板
   pagination.current = 1
@@ -538,6 +589,9 @@ async function handleExport() {
     if (filters.friend_id) params.friend_id = filters.friend_id
     if (filters.risk_levels && filters.risk_levels.length > 0) params.risk_levels = filters.risk_levels
     if (filters.keywords && filters.keywords.length > 0) params.keywords = filters.keywords
+//     if (filters.risk_level) params.risk_level = filters.risk_level
+//     if (filters.keyword) params.keyword = filters.keyword
+    if (filters.trigger_party) params.trigger_party = filters.trigger_party
     if (filters.timeRange && filters.timeRange.length === 2) {
       params.start_time = filters.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
       params.end_time = filters.timeRange[1].format('YYYY-MM-DD HH:mm:ss')

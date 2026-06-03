@@ -44,13 +44,63 @@ async def list_active_keywords(
         return {"data": grouped}
 
 
+@router.get("/keywords/stats")
+async def get_keyword_stats(
+    current_user: dict = Depends(require_permission("admin:keywords")),
+):
+    """获取关键词统计数据"""
+    async with async_session() as session:
+        # 总数
+        total = await session.scalar(select(func.count()).select_from(RiskKeyword))
+
+        # 启用数
+        active_count = await session.scalar(
+            select(func.count()).select_from(RiskKeyword).where(RiskKeyword.is_active == True)
+        )
+
+        # 按类别统计
+        category_stats = await session.execute(
+            select(RiskKeyword.category, func.count().label("count"))
+            .group_by(RiskKeyword.category)
+            .order_by(RiskKeyword.category)
+        )
+        category_data = [{"category": row[0], "count": row[1]} for row in category_stats.all()]
+
+        # 按严重程度统计
+        severity_stats = await session.execute(
+            select(RiskKeyword.severity, func.count().label("count"))
+            .group_by(RiskKeyword.severity)
+            .order_by(RiskKeyword.severity)
+        )
+        severity_data = [{"severity": row[0], "count": row[1]} for row in severity_stats.all()]
+
+        # 按类别和严重程度交叉统计
+        cross_stats = await session.execute(
+            select(RiskKeyword.category, RiskKeyword.severity, func.count().label("count"))
+            .group_by(RiskKeyword.category, RiskKeyword.severity)
+            .order_by(RiskKeyword.category, RiskKeyword.severity)
+        )
+        cross_data = [{"category": row[0], "severity": row[1], "count": row[2]} for row in cross_stats.all()]
+
+        return {
+            "total": total or 0,
+            "active_count": active_count or 0,
+            "inactive_count": (total or 0) - (active_count or 0),
+            "category_stats": category_data,
+            "severity_stats": severity_data,
+            "cross_stats": cross_data,
+        }
+
+
+
 @router.get("/keywords")
 async def list_keywords(
     category: str | None = Query(None, description="类别筛选"),
     is_active: bool | None = Query(None, description="是否启用"),
+    severity: str | None = Query(None, description="严重程度筛选"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    current_user: dict = Depends(require_permission("admin:all")),
+    current_user: dict = Depends(require_permission("admin:keywords")),
 ):
     """获取关键词列表（需要管理员权限）"""
     async with async_session() as session:
@@ -59,6 +109,8 @@ async def list_keywords(
             stmt = stmt.where(RiskKeyword.category == category)
         if is_active is not None:
             stmt = stmt.where(RiskKeyword.is_active == is_active)
+        if severity:
+            stmt = stmt.where(RiskKeyword.severity == severity)
 
         stmt = stmt.order_by(RiskKeyword.category, RiskKeyword.keyword)
 
@@ -68,6 +120,8 @@ async def list_keywords(
             count_stmt = count_stmt.where(RiskKeyword.category == category)
         if is_active is not None:
             count_stmt = count_stmt.where(RiskKeyword.is_active == is_active)
+        if severity:
+            count_stmt = count_stmt.where(RiskKeyword.severity == severity)
         total = await session.scalar(count_stmt)
 
         # 分页
@@ -89,7 +143,7 @@ async def add_keyword(
     keyword: str = Body(..., embed=True),
     category: str = Body(..., embed=True),
     severity: str = Body("medium", embed=True),
-    current_user: dict = Depends(require_permission("admin:all")),
+    current_user: dict = Depends(require_permission("admin:keywords")),
 ):
     """添加关键词（需要管理员权限）"""
     ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
@@ -136,7 +190,7 @@ async def update_keyword(
     category: str | None = Body(None, embed=True),
     severity: str | None = Body(None, embed=True),
     is_active: bool | None = Body(None, embed=True),
-    current_user: dict = Depends(require_permission("admin:all")),
+    current_user: dict = Depends(require_permission("admin:keywords")),
 ):
     """更新关键词（需要管理员权限）"""
     ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
@@ -185,7 +239,7 @@ async def update_keyword(
 async def delete_keyword(
     keyword_id: int,
     request: Request,
-    current_user: dict = Depends(require_permission("admin:all")),
+    current_user: dict = Depends(require_permission("admin:keywords")),
 ):
     """删除关键词（需要管理员权限）"""
     ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
@@ -217,7 +271,7 @@ async def delete_keyword(
 
 @router.post("/keywords/init-default")
 async def init_default_keywords(
-    current_user: dict = Depends(require_permission("admin:all")),
+    current_user: dict = Depends(require_permission("admin:keywords")),
 ):
     """初始化默认关键词（需要管理员权限）"""
     default_keywords = [

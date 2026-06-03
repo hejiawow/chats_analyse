@@ -60,6 +60,9 @@ async def query_quality_check_results(
     friend_id: int | None = Query(None, description="好友ID"),
     risk_levels: List[str] = Query(None, alias="risk_levels[]", description="风险等级列表：high/medium/low/none"),
     keywords: List[str] = Query(None, alias="keywords[]", description="关键词列表"),
+#     risk_level: str | None = Query(None, description="风险等级：high/medium/low/none"),
+    trigger_party: str | None = Query(None, description="触发方：sales/customer/both"),
+#     keyword: str | None = Query(None, description="关键词内容（模糊匹配）"),
     start_time: str | None = Query(None, description="开始时间（YYYY-MM-DD HH:mm:ss）"),
     end_time: str | None = Query(None, description="结束时间（YYYY-MM-DD HH:mm:ss）"),
     page: int = Query(1, ge=1),
@@ -78,6 +81,12 @@ async def query_quality_check_results(
         if friend_id is not None:
             stmt = stmt.where(QualityCheckResult.friend_id == friend_id)
         stmt = _build_risk_keyword_filter(stmt, risk_levels, keywords)
+#         if risk_level:
+#             stmt = stmt.where(QualityCheckResult.risk_level == risk_level)
+        if trigger_party:
+            stmt = stmt.where(QualityCheckResult.trigger_party == trigger_party)
+#         if keyword:
+#             stmt = stmt.where(QualityCheckResult.detected_keywords.ilike(f"%{keyword}%"))
 
         # 按检测时间范围筛选
         time_filter = _build_time_filter(start_time, end_time)
@@ -93,6 +102,12 @@ async def query_quality_check_results(
         if friend_id is not None:
             count_stmt = count_stmt.where(QualityCheckResult.friend_id == friend_id)
         count_stmt = _build_risk_keyword_filter(count_stmt, risk_levels, keywords)
+#         if risk_level:
+#             count_stmt = count_stmt.where(QualityCheckResult.risk_level == risk_level)
+        if trigger_party:
+            count_stmt = count_stmt.where(QualityCheckResult.trigger_party == trigger_party)
+#         if keyword:
+#             count_stmt = count_stmt.where(QualityCheckResult.detected_keywords.ilike(f"%{keyword}%"))
         if time_filter is not None:
             count_stmt = count_stmt.where(time_filter)
 
@@ -115,6 +130,7 @@ async def query_quality_check_results(
 async def get_quality_check_stats(
     user_id: str | None = Query(None, description="销售ID"),
     friend_id: int | None = Query(None, description="好友ID"),
+    trigger_party: str | None = Query(None, description="触发方：sales/customer/both"),
     keyword: str | None = Query(None, description="关键词"),
     start_time: str | None = Query(None, description="开始时间（YYYY-MM-DD HH:mm:ss）"),
     end_time: str | None = Query(None, description="结束时间（YYYY-MM-DD HH:mm:ss）"),
@@ -129,7 +145,7 @@ async def get_quality_check_stats(
     user_id_filter = user_id if user_id else None
 
     # 判断是否有筛选条件（影响缓存策略）
-    has_filters = user_id_filter or friend_id or keyword or start_time or end_time
+    has_filters = user_id_filter or friend_id or trigger_party or keyword or start_time or end_time
 
     # 缓存策略：无筛选条件时使用缓存，有筛选条件时不缓存
     cache_key = _STATS_CACHE_KEY
@@ -152,6 +168,8 @@ async def get_quality_check_stats(
             count_stmt = count_stmt.where(QualityCheckResult.user_id == user_id_filter)
         if friend_id is not None:
             count_stmt = count_stmt.where(QualityCheckResult.friend_id == friend_id)
+        if trigger_party:
+            count_stmt = count_stmt.where(QualityCheckResult.trigger_party == trigger_party)
         if keyword:
             count_stmt = count_stmt.where(QualityCheckResult.detected_keywords.ilike(f"%{escape_like_pattern(keyword)}%", escape="\\"))
         if time_filter is not None:
@@ -167,6 +185,8 @@ async def get_quality_check_stats(
             risk_stmt = risk_stmt.where(QualityCheckResult.user_id == user_id_filter)
         if friend_id is not None:
             risk_stmt = risk_stmt.where(QualityCheckResult.friend_id == friend_id)
+        if trigger_party:
+            risk_stmt = risk_stmt.where(QualityCheckResult.trigger_party == trigger_party)
         if keyword:
             risk_stmt = risk_stmt.where(QualityCheckResult.detected_keywords.ilike(f"%{escape_like_pattern(keyword)}%", escape="\\"))
         if time_filter is not None:
@@ -180,6 +200,8 @@ async def get_quality_check_stats(
             keyword_stmt = keyword_stmt.where(QualityCheckResult.user_id == user_id_filter)
         if friend_id is not None:
             keyword_stmt = keyword_stmt.where(QualityCheckResult.friend_id == friend_id)
+        if trigger_party:
+            keyword_stmt = keyword_stmt.where(QualityCheckResult.trigger_party == trigger_party)
         if keyword:
             keyword_stmt = keyword_stmt.where(QualityCheckResult.detected_keywords.ilike(f"%{escape_like_pattern(keyword)}%", escape="\\"))
         if time_filter is not None:
@@ -219,6 +241,7 @@ async def export_quality_check_results(
     friend_id: int | None = Query(None, description="好友ID"),
     risk_levels: List[str] = Query(None, alias="risk_levels[]", description="风险等级列表"),
     keywords: List[str] = Query(None, alias="keywords[]", description="关键词列表"),
+    trigger_party: str | None = Query(None, description="触发方：sales/customer/both"),
     start_time: str | None = Query(None, description="开始时间（YYYY-MM-DD HH:mm:ss）"),
     end_time: str | None = Query(None, description="结束时间（YYYY-MM-DD HH:mm:ss）"),
     limit: int = Query(10000, ge=1, le=50000, description="导出数量上限"),
@@ -238,6 +261,12 @@ async def export_quality_check_results(
         if friend_id is not None:
             stmt = stmt.where(QualityCheckResult.friend_id == friend_id)
         stmt = _build_risk_keyword_filter(stmt, risk_levels, keywords)
+#         if risk_level:
+#             stmt = stmt.where(QualityCheckResult.risk_level == risk_level)
+        if trigger_party:
+            stmt = stmt.where(QualityCheckResult.trigger_party == trigger_party)
+#         if keyword:
+#             stmt = stmt.where(QualityCheckResult.detected_keywords.ilike(f"%{keyword}%"))
         if time_filter is not None:
             stmt = stmt.where(time_filter)
         stmt = stmt.order_by(QualityCheckResult.created_at.desc())
@@ -254,7 +283,7 @@ async def export_quality_check_results(
     writer.writerow([
         "ID", "销售ID", "好友ID", "好友姓名", "好友备注", "好友别名", "绑定手机号", "备注手机号",
         "检测时间范围", "聊天记录数",
-        "关键词检测", "检测关键词", "风险等级", "风险类别",
+        "关键词检测", "检测关键词", "风险等级", "触发方", "风险类别",
         "风险描述", "建议措施", "创建时间"
     ])
 
@@ -274,6 +303,7 @@ async def export_quality_check_results(
             r.keyword_detected,
             r.detected_keywords or "",
             r.risk_level or "",
+            r.trigger_party or "",
             r.risk_category or "",
             r.risk_description or "",
             r.suggested_action or "",

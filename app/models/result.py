@@ -270,6 +270,7 @@ class QualityCheckResult(Base):
     status = Column(String(16), default="success", comment="success/failed/no_chat/no_keyword")
     error_msg = Column(Text, nullable=True, comment="失败原因")
     batch_task_id = Column(String(64), nullable=True, comment="批量任务ID")
+    trigger_party = Column(String(16), nullable=True, comment="触发方：sales/customer/both")
     created_at = Column(DateTime, default=lambda: datetime.now(), comment="创建时间")
 
     def to_dict(self) -> dict:
@@ -301,6 +302,7 @@ class QualityCheckResult(Base):
             "status": self.status,
             "error_msg": self.error_msg,
             "batch_task_id": self.batch_task_id,
+            "trigger_party": self.trigger_party,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -309,11 +311,12 @@ class QualityCheckResult(Base):
         Index("ix_quality_check_risk_level", "risk_level"),
         Index("ix_quality_check_created_at", "created_at"),
         Index("ix_quality_check_user_created", "user_id", "created_at"),
+        Index("ix_quality_check_trigger_party", "trigger_party"),
     )
 
 
 class RefundWhitelistPattern(Base):
-    """协议退费话术白名单"""
+    """协议话术白名单表"""
     __tablename__ = "refund_whitelist_patterns"
 
     id = Column(Integer, primary_key=True, autoincrement=True)

@@ -82,6 +82,9 @@ const allPermissions = [
   { value: 'read:agents', label: '查看智能体' },
   { value: 'admin:user', label: '用户管理' },
   { value: 'admin:role', label: '角色管理' },
+  { value: 'admin:keywords', label: '关键词管理' },
+  { value: 'admin:whitelist', label: '协议话术白名单管理' },
+  { value: 'admin:logs', label: '日志管理' },
   { value: 'admin:all', label: '所有权限（超级管理员）' },
 ]
 

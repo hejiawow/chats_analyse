@@ -7,7 +7,7 @@ from celery import chord
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
-from app.services.hujing_api import get_chat_pairs, get_chat_records, get_all_chat_messages, get_all_sales, get_friends_list
+from app.services.hujing_api import get_chat_pairs, get_chat_records, get_all_chat_messages, get_all_sales, get_friends_list, get_chat_records_for_quality_check
 from app.agents.quality_check import quality_check_agent
 from app.models.database import sync_engine
 from app.models.result import QualityCheckResult
@@ -163,6 +163,21 @@ def clear_batch_cancel(batch_task_id: str):
     redis_client.delete(key)
 
 
+# Lua 脚本：原子性 CAS 释放 CLI 锁（仅释放自己持有的）
+_RELEASE_CLI_LOCK_SCRIPT = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+else
+    return 0
+end
+"""
+
+
+def release_cli_lock(batch_task_id: str):
+    """释放 CLI 锁（原子性 CAS，仅释放自己持有的）"""
+    redis_client.eval(_RELEASE_CLI_LOCK_SCRIPT, 1, "batch:quality:cli_lock", batch_task_id)
+
+
 @celery_app.task(bind=True, name="app.tasks.batch_quality.run_single_batch_check", rate_limit="20/m")
 def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: int,
                            start_time: str, end_time: str):
@@ -177,8 +192,15 @@ def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: in
         }
 
     try:
-        # 获取聊天记录
-        chat_records = get_chat_records(user_id, friend_id, start_time, end_time)
+        # 计算实际使用的时间范围（基于配置项）
+        from datetime import datetime as dt
+        from datetime import timedelta as td
+        end_dt = dt.strptime(end_time, "%Y-%m-%d %H:%M:%S")
+        start_dt = end_dt - td(days=settings.QUALITY_CHECK_CHAT_DAYS)
+        actual_start_time = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        # 获取聊天记录（使用配置项）
+        chat_records = get_chat_records_for_quality_check(user_id, friend_id, end_time)
 
         if not chat_records:
             increment_batch_progress(batch_task_id)
@@ -189,10 +211,10 @@ def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: in
                 "keyword_detected": "no",
             }
 
-        # 执行质检分析
+        # 执行质检分析（使用实际的时间范围）
         result = quality_check_agent(
             user_id, friend_id, chat_records,
-            start_time=start_time,
+            start_time=actual_start_time,
             end_time=end_time,
         )
 
@@ -210,7 +232,7 @@ def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: in
                     alias=friend_info.get("alias"),
                     phone=friend_info.get("phone"),
                     remark_phone=friend_info.get("remark_phone"),
-                    check_time_start=start_time,
+                    check_time_start=actual_start_time,
                     check_time_end=end_time,
                     chat_record_count=result.get("chat_record_count", len(chat_records)),
                     keyword_detected=result.get("keyword_detected", "no"),
@@ -218,6 +240,7 @@ def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: in
                     keyword_matches=result.get("keyword_matches"),
                     risk_level=result.get("risk_level"),
                     risk_category=result.get("risk_category"),
+                    trigger_party=result.get("trigger_party"),
                     risk_description=result.get("risk_description"),
                     suggested_action=result.get("suggested_action"),
                     key_evidence=result.get("key_evidence"),
@@ -279,6 +302,9 @@ def on_batch_complete(self, results, batch_task_id: str):
 
     # 清除取消标记
     clear_batch_cancel(batch_task_id)
+
+    # 释放 CLI 锁（原子性 CAS，仅释放自己持有的）
+    release_cli_lock(batch_task_id)
 
     # === 清除统计缓存 ===
     invalidate_quality_check_stats_cache()
@@ -363,9 +389,16 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
     _log(batch_task_id, f"[开始] 销售:{user_id} 好友:{friend_id} 开始分析", "info")
 
     try:
-        # 获取完整聊天记录
+        # 计算实际使用的时间范围（基于配置项）
+        from datetime import datetime as dt
+        from datetime import timedelta as td
+        end_dt = dt.strptime(end_time, "%Y-%m-%d %H:%M:%S")
+        start_dt = end_dt - td(days=settings.QUALITY_CHECK_CHAT_DAYS)
+        actual_start_time = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        # 获取完整聊天记录（使用配置项）
         _log(batch_task_id, f"[获取] 销售:{user_id} 好友:{friend_id} 正在获取聊天记录...", "info")
-        chat_records = get_chat_records(user_id, friend_id, start_time, end_time)
+        chat_records = get_chat_records_for_quality_check(user_id, friend_id, end_time)
 
         if not chat_records:
             _log(batch_task_id, f"[无数据] 销售:{user_id} 好友:{friend_id} 无聊天记录", "info")
@@ -379,10 +412,10 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
 
         _log(batch_task_id, f"[分析] 销售:{user_id} 好友:{friend_id} 获取到 {len(chat_records)} 条记录，开始质检...", "info")
 
-        # 执行质检分析
+        # 执行质检分析（使用实际的时间范围）
         result = quality_check_agent(
             user_id, friend_id, chat_records,
-            start_time=start_time,
+            start_time=actual_start_time,
             end_time=end_time,
         )
 
@@ -401,7 +434,7 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
                     alias=friend_info.get("alias"),
                     phone=friend_info.get("phone"),
                     remark_phone=friend_info.get("remark_phone"),
-                    check_time_start=start_time,
+                    check_time_start=actual_start_time,
                     check_time_end=end_time,
                     chat_record_count=result.get("chat_record_count", len(chat_records)),
                     keyword_detected=result.get("keyword_detected", "no"),
@@ -409,6 +442,7 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
                     keyword_matches=result.get("keyword_matches"),
                     risk_level=result.get("risk_level"),
                     risk_category=result.get("risk_category"),
+                    trigger_party=result.get("trigger_party"),
                     risk_description=result.get("risk_description"),
                     suggested_action=result.get("suggested_action"),
                     key_evidence=result.get("key_evidence"),
@@ -495,11 +529,13 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
             update_batch_progress(batch_task_id, 0, 0, "error", error_message=error_msg)
         except Exception:
             logger.exception(f"Failed to update progress for task {batch_task_id}")
+        release_cli_lock(batch_task_id)
         return {"status": "error", "error_message": error_msg}
 
     if not all_messages:
         _log(batch_task_id, "[无数据] 时间范围内无聊天记录", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_messages")
+        release_cli_lock(batch_task_id)
         return {"status": "no_messages", "message": "时间范围内无聊天记录"}
 
     _log(batch_task_id, f"[成功] 获取到 {len(all_messages)} 条聊天记录", "info")
@@ -567,6 +603,7 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
     if not matched_pairs:
         _log(batch_task_id, "[完成] 未匹配到任何关键词", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_matches")
+        release_cli_lock(batch_task_id)
         return {"status": "no_matches", "message": "未匹配到任何关键词", "total_pairs": 0}
 
     _log(batch_task_id, f"[匹配] 发现 {len(matched_pairs)} 个匹配关键词的销售-好友对", "info")
@@ -575,7 +612,7 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
     _log(batch_task_id, "[过滤] 正在检查协议退费触发模式...", "info")
     from app.services.refund_filter import filter_matched_pairs
 
-    filtered_pairs = filter_matched_pairs(matched_pairs, start_time, end_time, batch_task_id, _log)
+    filtered_pairs = filter_matched_pairs(matched_pairs, start_time, end_time, batch_task_id, _log, all_messages=all_messages)
 
     filtered_count = len(matched_pairs) - len(filtered_pairs)
     if filtered_count > 0:
@@ -589,6 +626,7 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
     if not matched_pairs:
         _log(batch_task_id, "[完成] 过滤后无待分析的销售-好友对", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_matches")
+        release_cli_lock(batch_task_id)
         return {"status": "no_matches", "message": "过滤后无待分析的销售-好友对", "total_pairs": 0,
                 "filtered_count": filtered_count}
 
