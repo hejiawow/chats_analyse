@@ -453,6 +453,7 @@ function formatDateTime(isoString) {
   } catch {
     return isoString
   }
+}
 // 触发方颜色映射
 const getTriggerPartyColor = (trigger_party) => {
   const colorMap = {
