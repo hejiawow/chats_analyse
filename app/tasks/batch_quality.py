@@ -612,7 +612,7 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
     _log(batch_task_id, "[过滤] 正在检查协议退费触发模式...", "info")
     from app.services.refund_filter import filter_matched_pairs
 
-    filtered_pairs = filter_matched_pairs(matched_pairs, start_time, end_time, batch_task_id, _log)
+    filtered_pairs = filter_matched_pairs(matched_pairs, start_time, end_time, batch_task_id, _log, all_messages=all_messages)
 
     filtered_count = len(matched_pairs) - len(filtered_pairs)
     if filtered_count > 0:
