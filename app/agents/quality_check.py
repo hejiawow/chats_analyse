@@ -10,10 +10,66 @@ from sqlalchemy import select
 from app.agents.registry import AgentRegistry
 from app.services.ai_client import get_llm
 from app.services.ai_semaphore import get_ai_semaphore
+from app.services.voice_transcription_service import voice_service
 from app.prompts import load_prompt
 from app.models.database import sync_engine
 from app.models.result import RiskKeyword
 from sqlalchemy.orm import Session
+
+
+def _resolve_voice_url(voice_path: str) -> str:
+    """
+    补全语音文件URL
+
+    如果voice_path是相对路径，补全为完整URL
+    """
+    from config import settings
+
+    # 如果已经是完整URL，直接返回
+    if voice_path.startswith("http://") or voice_path.startswith("https://"):
+        return voice_path
+
+    # 获取文件服务基础URL
+    file_base_url = settings.HUJING_FILE_BASE_URL
+
+    # 如果未配置，从API基础URL推断
+    if not file_base_url and settings.HUJING_API_BASE_URL:
+        # 从 https://hj.ahujiaoyu.com:9029 提取 https://hj.ahujiaoyu.com
+        import re
+        match = re.match(r"(https?://[^/]+)", settings.HUJING_API_BASE_URL)
+        if match:
+            file_base_url = match.group(1).replace(":9029", "").replace(":80", "").replace(":443", "")
+
+    if not file_base_url:
+        # 无法补全，返回原路径
+        return voice_path
+
+    # 构建完整URL
+    # 格式: https://hj.ahujiaoyu.com/srb/common/file?path={voice_path}&app_id={app_id}
+    encoded_path = voice_path.replace("/", "%2F")
+    return f"{file_base_url}/srb/common/file?path={encoded_path}&app_id={settings.HUJING_APP_ID}"
+
+
+def _transcribe_voice_messages(chat_records: list) -> tuple[list, dict]:
+    """
+    将聊天记录中的语音消息转换为文字
+
+    使用 VoiceTranscriptionService 批量转写
+
+    Args:
+        chat_records: 原始聊天记录列表
+
+    Returns:
+        (处理后的聊天记录, 转写统计信息)
+    """
+    # 使用新的语音转写服务
+    processed_records, stats = voice_service.transcribe_chat_records(chat_records)
+
+    # 转换统计格式兼容旧代码
+    return processed_records, {
+        "transcribed_count": stats["success"],
+        "error_count": stats["failed"],
+    }
 
 
 def _get_active_keywords() -> list[dict]:
@@ -176,11 +232,15 @@ def quality_check_agent(
     """质检智能体主函数
 
     流程：
-    1. 从数据库获取关键词配置
-    2. 关键词预检测
-    3. 若检测到关键词，触发AI深度分析
-    4. 返回结构化结果
+    1. 语音消息转文字（如有）
+    2. 从数据库获取关键词配置
+    3. 关键词预检测
+    4. 若检测到关键词，触发AI深度分析
+    5. 返回结构化结果
     """
+
+    # 步骤1: 语音消息转文字（替换sentence中的URL为转写文字）
+    chat_records, voice_stats = _transcribe_voice_messages(chat_records)
 
     # 获取关键词配置
     keywords = _get_active_keywords()
@@ -222,6 +282,8 @@ def quality_check_agent(
         "chat_record_count": len(chat_records),
         "check_time_start": start_time,
         "check_time_end": end_time,
+        "voice_transcribed_count": voice_stats["transcribed_count"],
+        "voice_transcribe_error_count": voice_stats["error_count"],
     }
 
     if keyword_result["detected"] == "no":
