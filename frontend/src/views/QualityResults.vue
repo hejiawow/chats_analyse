@@ -34,7 +34,7 @@
 
     <!-- 筛选栏 -->
     <a-form layout="inline" :model="filters" class="qr-filter-bar">
-      <a-form-item label="时间范围">
+      <a-form-item label="聊天时间范围">
         <a-range-picker
           v-model:value="filters.timeRange"
           :show-time="{ format: 'HH:mm:ss' }"
@@ -50,13 +50,9 @@
         <a-input v-model:value="filters.friend_id" placeholder="好友ID" style="width: 140px" />
       </a-form-item>
       <a-form-item label="风险等级">
-        <a-select v-model:value="filters.risk_level" placeholder="全部" style="width: 120px" allowClear>
-          <a-select-option value="high">高风险</a-select-option>
-          <a-select-option value="medium">中风险</a-select-option>
-          <a-select-option value="low">低风险</a-select-option>
-          <a-select-option value="none">无风险</a-select-option>
-        </a-select>
+        <a-checkbox-group v-model:value="filters.risk_levels" :options="riskLevelOptions" />
       </a-form-item>
+<!--             <a-form-item> -->
       <a-form-item label="关键词">
         <a-select v-model:value="filters.keyword" placeholder="全部" style="width: 120px" allowClear showSearch>
           <a-select-option v-for="kw in keywordOptions" :key="kw" :value="kw">{{ kw }}</a-select-option>
@@ -76,6 +72,31 @@
       </a-form-item>
     </a-form>
 
+    <!-- 关键词筛选折叠面板 -->
+    <a-collapse v-model:activeKey="keywordsCollapseActive" class="qr-keywords-collapse">
+      <a-collapse-panel key="keywords" header="关键词筛选（点击展开）">
+        <a-checkbox-group v-model:value="filters.keywords">
+          <div class="qr-keywords-table-layout">
+            <!-- 类别标题行 -->
+            <div class="qr-keywords-header-row">
+              <div v-for="(keywords, category) in keywordOptions" :key="category" class="qr-keywords-header-cell">
+                {{ categoryNames[category] || category }}
+              </div>
+            </div>
+
+            <!-- 关键词内容行 -->
+            <div class="qr-keywords-content-row">
+              <div v-for="(keywords, category) in keywordOptions" :key="category" class="qr-keywords-content-cell">
+                <a-checkbox v-for="kw in keywords" :key="kw" :value="kw" class="qr-keyword-checkbox-vertical">
+                  {{ kw }}
+                </a-checkbox>
+              </div>
+            </div>
+          </div>
+        </a-checkbox-group>
+      </a-collapse-panel>
+    </a-collapse>
+
     <!-- 结果表格 -->
     <a-table
       :columns="columns"
@@ -85,8 +106,12 @@
       row-key="id"
       size="small"
       @change="handleTableChange"
+      :scroll="{ x: 'max-content' }" 
     >
       <template #bodyCell="{ column, record }">
+        <template v-if="column.key === 'created_at'">
+          <span>{{ formatDateTime(record.created_at) }}</span>
+        </template>
         <template v-if="column.key === 'user_name'">
           <div>
             <div>{{ record.user_name || '-' }}</div>
@@ -141,7 +166,7 @@
             <a-descriptions-item label="好友别名">{{ detailData.alias || '-' }}</a-descriptions-item>
             <a-descriptions-item label="绑定手机号">{{ detailData.phone || '-' }}</a-descriptions-item>
             <a-descriptions-item label="备注手机号">{{ detailData.remark_phone || '-' }}</a-descriptions-item>
-            <a-descriptions-item label="检测时间">{{ detailData.check_time_start }} ~ {{ detailData.check_time_end }}</a-descriptions-item>
+            <a-descriptions-item label="检测时间">{{ formatDateTime(detailData.check_time_start) }} ~ {{ formatDateTime(detailData.check_time_end) }}</a-descriptions-item>
             <a-descriptions-item label="聊天记录数">{{ detailData.chat_record_count }}</a-descriptions-item>
             <a-descriptions-item label="检测关键词">{{ detailData.detected_keywords || '无' }}</a-descriptions-item>
             <a-descriptions-item v-if="detailData.keyword_matches && detailData.keyword_matches.length" label="关键词匹配">
@@ -226,7 +251,7 @@
         <div class="chat-records-header">
           共 {{ chatRecordsTotal }} 条聊天记录
           <span v-if="detailData" style="margin-left: 12px; color: #666">
-            时间范围：{{ detailData.check_time_start }} ~ {{ detailData.check_time_end }}
+            时间范围：{{ formatDateTime(detailData.check_time_start) }} ~ {{ formatDateTime(detailData.check_time_end) }}
           </span>
         </div>
         <div class="chat-records-content">
@@ -317,11 +342,39 @@ const barChartRef = ref(null)
 let pieChart = null
 let barChart = null
 
-// 关键词选项列表（用于筛选下拉框）
-const keywordOptions = ref([])
+// 关键词选项列表（用于筛选下拉框，按类别分组）
+const keywordOptions = ref({})
+
+// 类别名称映射
+const categoryNames = {
+  'refund': '退款相关',
+  'complaint': '投诉相关',
+  'order_cancel': '取消订单',
+  'regulatory': '监管机构',
+  'fraud': '欺诈相关'
+}
 
 // 筛选
-const filters = reactive({ user_id: '', friend_id: '', risk_level: null, keyword: '', trigger_party: undefined, timeRange: null })
+const filters = reactive({
+  user_id: '',
+  friend_id: '',
+  risk_levels: [],   // 风险等级数组
+  keywords: [],      // 关键词数组
+  trigger_party: undefined,
+  timeRange: null
+})
+
+// 关键词折叠面板状态（默认折叠）
+const keywordsCollapseActive = ref([])
+
+// 风险等级选项配置
+const riskLevelOptions = [
+  { label: '高风险', value: 'high' },
+  { label: '中风险', value: 'medium' },
+  { label: '低风险', value: 'low' },
+  { label: '无风险', value: 'none' }
+]
+// const filters = reactive({ user_id: '', friend_id: '', risk_level: null, keyword: '', trigger_party: undefined, timeRange: null })
 
 // 表格
 const data = ref([])
@@ -335,18 +388,18 @@ const pagination = reactive({
 })
 
 const columns = [
-  { title: '时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
-  { title: '销售', key: 'user_name', width: 140 },
-  { title: '好友', key: 'friend_name', width: 140 },
-  { title: '好友备注', dataIndex: 'chat_title', key: 'chat_title', width: 120, ellipsis: true },
-  { title: '好友别名', dataIndex: 'alias', key: 'alias', width: 120, ellipsis: true },
-  { title: '绑定手机号', dataIndex: 'phone', key: 'phone', width: 120 },
-  { title: '备注手机号', dataIndex: 'remark_phone', key: 'remark_phone', width: 120 },
-  { title: '风险等级', key: 'risk_level', width: 120 },
+  { title: '时间', dataIndex: 'created_at', key: 'created_at', minWidth: 160, ellipsis: true},
+  { title: '销售', key: 'user_name', minWidth: 130, ellipsis: true },
+  { title: '好友', key: 'friend_name', minWidth: 130, ellipsis: true },
+  { title: '好友备注', dataIndex: 'chat_title', key: 'chat_title', minWidth: 120, ellipsis: true },
+  { title: '好友别名', dataIndex: 'alias', key: 'alias', minWidth: 120, ellipsis: true },
+  { title: '绑定手机号', dataIndex: 'phone', key: 'phone', minWidth: 130, ellipsis: true },
+  { title: '备注手机号', dataIndex: 'remark_phone', key: 'remark_phone', minWidth: 130, ellipsis: true },
+  { title: '风险等级', key: 'risk_level', minWidth: 100 },
   { title: '触发方', dataIndex: 'trigger_party', key: 'trigger_party', width: 100 },
-  { title: '检测关键词', key: 'detected_keywords', width: 150, ellipsis: true },
-  { title: '风险描述', key: 'risk_description', ellipsis: true },
-  { title: '风险类别', dataIndex: 'risk_category', key: 'risk_category', width: 100 },
+  { title: '检测关键词', key: 'detected_keywords', minWidth: 150, ellipsis: true },
+  { title: '风险描述', key: 'risk_description', ellipsis: true }, // 无宽度，自适应
+  { title: '风险类别', dataIndex: 'risk_category', key: 'risk_category', minWidth: 100 },
   { title: '备注', dataIndex: 'remark', key: 'remark', width: 150, ellipsis: true },
   { title: '操作', key: 'actions', width: 80, fixed: 'right' },
 ]
@@ -385,6 +438,21 @@ function getRiskText(level) {
   return map[level] || '未知'
 }
 
+// 时间格式化：将 ISO 格式转为 YYYY-MM-DD HH:mm:ss
+function formatDateTime(isoString) {
+  if (!isoString) return '-'
+  try {
+    const date = new Date(isoString)
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hour = String(date.getHours()).padStart(2, '0')
+    const minute = String(date.getMinutes()).padStart(2, '0')
+    const second = String(date.getSeconds()).padStart(2, '0')
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}`
+  } catch {
+    return isoString
+  }
 // 触发方颜色映射
 const getTriggerPartyColor = (trigger_party) => {
   const colorMap = {
@@ -486,7 +554,8 @@ async function loadKeywords() {
     if (cached) {
       try {
         const { data, timestamp } = JSON.parse(cached)
-        if (typeof timestamp === 'number' && Date.now() - timestamp < KEYWORDS_CACHE_TTL) {
+        // 检查缓存是否过期，且数据格式是否正确（必须是对象，不能是数组）
+        if (typeof timestamp === 'number' && Date.now() - timestamp < KEYWORDS_CACHE_TTL && typeof data === 'object' && !Array.isArray(data)) {
           keywordOptions.value = data
           return
         }
@@ -498,7 +567,7 @@ async function loadKeywords() {
 
   try {
     const res = await getActiveKeywords()
-    keywordOptions.value = res.data || []
+    keywordOptions.value = res.data || {}  // 现在是对象
     // 存入 localStorage（仅当可用时）
     if (isLocalStorageAvailable()) {
       try {
@@ -511,7 +580,7 @@ async function loadKeywords() {
       }
     }
   } catch {
-    keywordOptions.value = []
+    keywordOptions.value = {}
   }
 }
 
@@ -522,8 +591,10 @@ async function loadData() {
     const params = { page: pagination.current, page_size: pagination.pageSize }
     if (filters.user_id) params.user_id = filters.user_id
     if (filters.friend_id) params.friend_id = filters.friend_id
-    if (filters.risk_level) params.risk_level = filters.risk_level
-    if (filters.keyword) params.keyword = filters.keyword
+    if (filters.risk_levels && filters.risk_levels.length > 0) params.risk_levels = filters.risk_levels
+    if (filters.keywords && filters.keywords.length > 0) params.keywords = filters.keywords
+//     if (filters.risk_level) params.risk_level = filters.risk_level
+//     if (filters.keyword) params.keyword = filters.keyword
     if (filters.trigger_party) params.trigger_party = filters.trigger_party
     if (filters.timeRange && filters.timeRange.length === 2) {
       params.start_time = filters.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
@@ -550,10 +621,13 @@ function handleSearch() {
 function handleReset() {
   filters.user_id = ''
   filters.friend_id = ''
-  filters.risk_level = null
-  filters.keyword = ''
+  filters.risk_levels = []
+  filters.keywords = []
+//   filters.risk_level = null
+//   filters.keyword = ''
   filters.trigger_party = undefined
   filters.timeRange = null
+  keywordsCollapseActive.value = []  // 折叠关键词面板
   pagination.current = 1
   loadData()
   loadStats()
@@ -693,8 +767,10 @@ async function handleExport() {
     const params = {}
     if (filters.user_id) params.user_id = filters.user_id
     if (filters.friend_id) params.friend_id = filters.friend_id
-    if (filters.risk_level) params.risk_level = filters.risk_level
-    if (filters.keyword) params.keyword = filters.keyword
+    if (filters.risk_levels && filters.risk_levels.length > 0) params.risk_levels = filters.risk_levels
+    if (filters.keywords && filters.keywords.length > 0) params.keywords = filters.keywords
+//     if (filters.risk_level) params.risk_level = filters.risk_level
+//     if (filters.keyword) params.keyword = filters.keyword
     if (filters.trigger_party) params.trigger_party = filters.trigger_party
     if (filters.timeRange && filters.timeRange.length === 2) {
       params.start_time = filters.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
@@ -718,6 +794,21 @@ async function handleExport() {
 watch(collapseActiveKey, (keys) => {
   if (keys.includes('charts')) {
     nextTick(() => renderCharts())
+  }
+})
+
+// 监听风险等级变化，自动触发筛选
+watch(() => filters.risk_levels, (newVal, oldVal) => {
+  // 避免初始化时触发（oldVal为undefined）
+  if (oldVal !== undefined && newVal !== oldVal) {
+    handleSearch()
+  }
+})
+
+// 监听关键词变化，自动触发筛选
+watch(() => filters.keywords, (newVal, oldVal) => {
+  if (oldVal !== undefined && newVal !== oldVal) {
+    handleSearch()
   }
 })
 
@@ -787,7 +878,7 @@ onMounted(() => {
 
 /* 筛选栏 */
 .qr-filter-bar {
-  margin-bottom: 16px;
+  margin-bottom: 5px;
   padding: 16px 20px;
   background: #fff;
   border-radius: 8px;
@@ -891,5 +982,75 @@ onMounted(() => {
 .chat-message.is-self .chat-bubble::before {
   right: -10px;
   border-left-color: #95ec69;
+}
+
+/* 关键词筛选折叠面板 */
+.qr-keywords-collapse {
+  margin-bottom: 16px;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+/* 关键词表格布局 */
+.qr-keywords-table-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 类别标题行 */
+.qr-keywords-header-row {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.qr-keywords-header-cell {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  text-align: center;
+  background: #f8fafc;
+}
+
+/* 关键词内容行 */
+.qr-keywords-content-row {
+  display: flex;
+  gap: 0;
+}
+
+.qr-keywords-content-cell {
+  flex: 1;
+  padding: 8px 12px;
+  min-width: 120px;
+}
+
+/* 关键词checkbox垂直排列并确保对齐 */
+.qr-keyword-checkbox-vertical {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.qr-keyword-checkbox-vertical:last-child {
+  margin-bottom: 0;
+}
+
+/* 确保Ant Design Vue的checkbox内容对齐 */
+.qr-keywords-content-cell .ant-checkbox-wrapper {
+  display: flex;
+  align-items: center;
+}
+
+.qr-keywords-content-cell .ant-checkbox {
+  margin-right: 8px;
+}
+
+.qr-keywords-content-cell .ant-checkbox + span {
+  padding-right: 0;
+  line-height: 1.5;
 }
 </style>
