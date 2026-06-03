@@ -163,6 +163,21 @@ def clear_batch_cancel(batch_task_id: str):
     redis_client.delete(key)
 
 
+# Lua 脚本：原子性 CAS 释放 CLI 锁（仅释放自己持有的）
+_RELEASE_CLI_LOCK_SCRIPT = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+else
+    return 0
+end
+"""
+
+
+def release_cli_lock(batch_task_id: str):
+    """释放 CLI 锁（原子性 CAS，仅释放自己持有的）"""
+    redis_client.eval(_RELEASE_CLI_LOCK_SCRIPT, 1, "batch:quality:cli_lock", batch_task_id)
+
+
 @celery_app.task(bind=True, name="app.tasks.batch_quality.run_single_batch_check", rate_limit="20/m")
 def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: int,
                            start_time: str, end_time: str):
@@ -287,6 +302,9 @@ def on_batch_complete(self, results, batch_task_id: str):
 
     # 清除取消标记
     clear_batch_cancel(batch_task_id)
+
+    # 释放 CLI 锁（原子性 CAS，仅释放自己持有的）
+    release_cli_lock(batch_task_id)
 
     # === 清除统计缓存 ===
     invalidate_quality_check_stats_cache()
@@ -511,11 +529,13 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
             update_batch_progress(batch_task_id, 0, 0, "error", error_message=error_msg)
         except Exception:
             logger.exception(f"Failed to update progress for task {batch_task_id}")
+        release_cli_lock(batch_task_id)
         return {"status": "error", "error_message": error_msg}
 
     if not all_messages:
         _log(batch_task_id, "[无数据] 时间范围内无聊天记录", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_messages")
+        release_cli_lock(batch_task_id)
         return {"status": "no_messages", "message": "时间范围内无聊天记录"}
 
     _log(batch_task_id, f"[成功] 获取到 {len(all_messages)} 条聊天记录", "info")
@@ -583,6 +603,7 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
     if not matched_pairs:
         _log(batch_task_id, "[完成] 未匹配到任何关键词", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_matches")
+        release_cli_lock(batch_task_id)
         return {"status": "no_matches", "message": "未匹配到任何关键词", "total_pairs": 0}
 
     _log(batch_task_id, f"[匹配] 发现 {len(matched_pairs)} 个匹配关键词的销售-好友对", "info")
@@ -605,6 +626,7 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
     if not matched_pairs:
         _log(batch_task_id, "[完成] 过滤后无待分析的销售-好友对", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_matches")
+        release_cli_lock(batch_task_id)
         return {"status": "no_matches", "message": "过滤后无待分析的销售-好友对", "total_pairs": 0,
                 "filtered_count": filtered_count}
 

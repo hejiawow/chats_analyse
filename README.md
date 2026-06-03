@@ -107,8 +107,9 @@ hujing-agent-platform/
 │   └ dist/                       # 构建产物（生产环境）
 │   └ node_modules/               # npm 依赖
 │
-├── scripts/                      # 系统初始化脚本
-│   └ init_auth.py               # 初始化用户和角色
+├── scripts/                      # 系统脚本
+│   ├── init_auth.py              # 初始化用户和角色
+│   └── trigger_quality_check.py  # 命令行触发批量质检（支持 crontab）
 │
 ├── documents/                    # [临时文档] 可清理
 │
@@ -398,6 +399,63 @@ python -m app.scripts.populate_script_library
 
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
+
+## 命令行工具
+
+### 批量质检触发 (`scripts/trigger_quality_check.py`)
+
+通过命令行触发批量质检分析（quality_check），任务通过 Celery 异步执行，CLI 提交后立即退出。适合配合系统 crontab 实现定时自动质检。
+
+**使用方式：**
+
+```bash
+# 默认：扫描过去 24 小时的聊天记录
+python scripts/trigger_quality_check.py
+
+# 指定时间范围
+python scripts/trigger_quality_check.py \
+  --start-time "2026-06-01 00:00:00" \
+  --end-time "2026-06-01 23:59:59"
+
+# 筛选特定销售
+python scripts/trigger_quality_check.py --user-id "sales_001"
+
+# 限制分析数量
+python scripts/trigger_quality_check.py --limit 100
+
+# 模拟运行（不实际提交）
+python scripts/trigger_quality_check.py --dry-run
+
+# 强制提交（跳过锁检查）
+python scripts/trigger_quality_check.py --force
+```
+
+**参数说明：**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--start-time` | 当前时间 - 24h | 检测开始时间，格式 `YYYY-MM-DD HH:MM:SS` |
+| `--end-time` | 当前时间 | 检测结束时间，格式 `YYYY-MM-DD HH:MM:SS` |
+| `--user-id` | 全部 | 筛选特定销售 ID |
+| `--limit` | 500 | 最大分析数量 |
+| `--force` | false | 跳过锁检查，强制提交 |
+| `--dry-run` | false | 仅打印参数，不提交任务 |
+
+**防重复机制：**
+
+脚本使用 Redis 分布式锁防止重复提交（锁 TTL 3 小时）。如果上一次任务仍在运行，本次提交会自动跳过（退出码 0）。使用 `--force` 可强制跳过锁检查。
+
+**Crontab 定时调度：**
+
+```bash
+# 每小时整点执行一次质检（Docker 部署环境）
+0 * * * * cd /opt/chats_analyse && docker compose exec -T worker python scripts/trigger_quality_check.py >> /var/log/quality_check_cron.log 2>&1
+
+# 每 2 小时执行一次
+0 */2 * * * cd /opt/chats_analyse && docker compose exec -T worker python scripts/trigger_quality_check.py >> /var/log/quality_check_cron.log 2>&1
+```
+
+> 注意：`docker compose exec` 需要 `-T` 标志禁用伪终端分配（crontab 环境必需）。
 
 ## 权限说明
 
