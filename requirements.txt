@@ -13,10 +13,13 @@ greenlet>=3.0.0
 asyncpg==0.30.0
 psycopg2-binary==2.9.10
 alembic==1.13.3
-python-docx==1.1.2
+greenlet==3.5.1
 
 # HTTP
 requests==2.32.3
+
+# Document generation
+python-docx==1.2.0
 
 # Vector / RAG
 pgvector>=0.2.5
