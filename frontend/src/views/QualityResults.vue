@@ -125,7 +125,12 @@
           </div>
         </template>
         <template v-if="column.key === 'risk_level'">
-          <a-tag :color="getRiskColor(record.risk_level)">{{ getRiskText(record.risk_level) }}</a-tag>
+          <div>
+            <a-tag :color="getRiskColor(record.display_risk_level || record.risk_level)">
+              {{ getRiskText(record.display_risk_level || record.risk_level) }}
+            </a-tag>
+            <a-tag v-if="record.modified_risk_level" color="purple" size="small" style="margin-left: 4px; font-size: 10px; padding: 0 3px">改</a-tag>
+          </div>
         </template>
         <template v-if="column.key === 'trigger_party'">
           <a-tag :color="getTriggerPartyColor(record.trigger_party)">
@@ -138,6 +143,9 @@
         <template v-if="column.key === 'risk_description'">
           <span :title="record.risk_description">{{ record.risk_description || '-' }}</span>
         </template>
+        <template v-if="column.key === 'remark'">
+          <span :title="record.remark">{{ record.remark || '-' }}</span>
+        </template>
         <template v-if="column.key === 'actions'">
           <a-button size="small" type="link" @click="showDetail(record)">详情</a-button>
         </template>
@@ -145,45 +153,90 @@
     </a-table>
 
     <!-- 详情弹窗 -->
-    <a-modal style="top: 20px" v-model:open="detailVisible" title="质检详情" width="750px" okText="确定" cancelText="取消">
-      <a-descriptions v-if="detailData" :column="1" bordered size="small" :label-style="{ width: '120px', minWidth: '120px' }">
-        <a-descriptions-item label="销售ID">{{ detailData.user_id }}</a-descriptions-item>
-        <a-descriptions-item label="销售姓名">{{ detailData.user_name || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="好友ID">{{ detailData.friend_id }}</a-descriptions-item>
-        <a-descriptions-item label="好友姓名">{{ detailData.friend_name || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="好友备注">{{ detailData.chat_title || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="好友别名">{{ detailData.alias || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="绑定手机号">{{ detailData.phone || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="备注手机号">{{ detailData.remark_phone || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="检测时间">{{ formatDateTime(detailData.check_time_start) }} ~ {{ formatDateTime(detailData.check_time_end) }}</a-descriptions-item>
-        <a-descriptions-item label="聊天记录数">{{ detailData.chat_record_count }}</a-descriptions-item>
-        <a-descriptions-item label="检测关键词">{{ detailData.detected_keywords || '无' }}</a-descriptions-item>
-        <a-descriptions-item v-if="detailData.keyword_matches && detailData.keyword_matches.length" label="关键词匹配">
-          <div v-for="(m, idx) in detailData.keyword_matches" :key="idx" style="margin-bottom: 8px">
-            <div><strong>{{ m.keyword }}</strong> - {{ m.speaker }} - {{ m.time }}</div>
-            <div style="color: #666">{{ m.message }}</div>
+    <a-modal style="top: 20px" v-model:open="detailVisible" title="质检详情" width="750px" :footer="null" :closable="true">
+      <div v-if="detailData">
+        <!-- 非编辑模式 -->
+        <div v-if="!editMode">
+          <a-descriptions :column="1" bordered size="small" :label-style="{ width: '120px', minWidth: '120px' }">
+            <a-descriptions-item label="销售ID">{{ detailData.user_id }}</a-descriptions-item>
+            <a-descriptions-item label="销售姓名">{{ detailData.user_name || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="好友ID">{{ detailData.friend_id }}</a-descriptions-item>
+            <a-descriptions-item label="好友姓名">{{ detailData.friend_name || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="好友备注">{{ detailData.chat_title || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="好友别名">{{ detailData.alias || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="绑定手机号">{{ detailData.phone || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="备注手机号">{{ detailData.remark_phone || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="检测时间">{{ formatDateTime(detailData.check_time_start) }} ~ {{ formatDateTime(detailData.check_time_end) }}</a-descriptions-item>
+            <a-descriptions-item label="聊天记录数">{{ detailData.chat_record_count }}</a-descriptions-item>
+            <a-descriptions-item label="检测关键词">{{ detailData.detected_keywords || '无' }}</a-descriptions-item>
+            <a-descriptions-item v-if="detailData.keyword_matches && detailData.keyword_matches.length" label="关键词匹配">
+              <div v-for="(m, idx) in detailData.keyword_matches" :key="idx" style="margin-bottom: 8px">
+                <div><strong>{{ m.keyword }}</strong> - {{ m.speaker }} - {{ m.time }}</div>
+                <div style="color: #666">{{ m.message }}</div>
+              </div>
+              <a-button type="link" size="small" @click="showChatRecords" style="margin-top: 8px">查看全部聊天记录</a-button>
+            </a-descriptions-item>
+            <a-descriptions-item v-else label="聊天记录">
+              <a-button type="link" size="small" @click="showChatRecords">查看全部聊天记录</a-button>
+            </a-descriptions-item>
+            <a-descriptions-item v-if="detailData.risk_level" label="风险等级">
+              <div>
+                <a-tag :color="getRiskColor(detailData.display_risk_level || detailData.risk_level)">
+                  {{ getRiskText(detailData.display_risk_level || detailData.risk_level) }}
+                </a-tag>
+                <a-tag v-if="detailData.modified_risk_level" color="purple" style="margin-left: 4px">已修正</a-tag>
+              </div>
+              <div v-if="detailData.modified_risk_level" style="font-size: 12px; color: #999; margin-top: 4px">
+                原始等级: {{ getRiskText(detailData.risk_level) }}
+              </div>
+            </a-descriptions-item>
+            <a-descriptions-item v-if="detailData.trigger_party" label="触发方">
+              <a-tag :color="getTriggerPartyColor(detailData.trigger_party)">
+                {{ getTriggerPartyText(detailData.trigger_party) }}
+              </a-tag>
+            </a-descriptions-item>
+            <a-descriptions-item v-if="detailData.risk_category" label="风险类别">{{ detailData.risk_category }}</a-descriptions-item>
+            <a-descriptions-item label="风险描述">
+              <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.risk_description || '-' }}</pre>
+            </a-descriptions-item>
+            <a-descriptions-item label="建议措施">
+              <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.suggested_action || '-' }}</pre>
+            </a-descriptions-item>
+            <a-descriptions-item label="备注">
+              <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.remark || '-' }}</pre>
+            </a-descriptions-item>
+          </a-descriptions>
+          <div style="margin-top: 16px; text-align: right">
+            <a-button @click="showModificationLogs" style="margin-right: 8px">修改记录</a-button>
+            <a-button type="primary" @click="enterEditMode">编辑</a-button>
           </div>
-          <a-button type="link" size="small" @click="showChatRecords" style="margin-top: 8px">查看全部聊天记录</a-button>
-        </a-descriptions-item>
-        <a-descriptions-item v-else label="聊天记录">
-          <a-button type="link" size="small" @click="showChatRecords">查看全部聊天记录</a-button>
-        </a-descriptions-item>
-        <a-descriptions-item v-if="detailData.risk_level" label="风险等级">
-          <a-tag :color="getRiskColor(detailData.risk_level)">{{ getRiskText(detailData.risk_level) }}</a-tag>
-        </a-descriptions-item>
-        <a-descriptions-item v-if="detailData.trigger_party" label="触发方">
-          <a-tag :color="getTriggerPartyColor(detailData.trigger_party)">
-            {{ getTriggerPartyText(detailData.trigger_party) }}
-          </a-tag>
-        </a-descriptions-item>
-        <a-descriptions-item v-if="detailData.risk_category" label="风险类别">{{ detailData.risk_category }}</a-descriptions-item>
-        <a-descriptions-item label="风险描述">
-          <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.risk_description || '-' }}</pre>
-        </a-descriptions-item>
-        <a-descriptions-item label="建议措施">
-          <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.suggested_action || '-' }}</pre>
-        </a-descriptions-item>
-      </a-descriptions>
+        </div>
+        <!-- 编辑模式 -->
+        <div v-else>
+          <a-descriptions :column="1" bordered size="small" :label-style="{ width: '120px', minWidth: '120px' }">
+            <a-descriptions-item label="销售ID">{{ detailData.user_id }}</a-descriptions-item>
+            <a-descriptions-item label="好友ID">{{ detailData.friend_id }}</a-descriptions-item>
+            <a-descriptions-item label="风险等级">
+              <a-select v-model:value="editForm.risk_level" style="width: 120px">
+                <a-select-option value="high">高风险</a-select-option>
+                <a-select-option value="medium">中风险</a-select-option>
+                <a-select-option value="low">低风险</a-select-option>
+                <a-select-option value="none">无风险</a-select-option>
+              </a-select>
+              <span v-if="editForm.risk_level !== detailData.risk_level" style="margin-left: 8px; color: #999; font-size: 12px">
+                (原始: {{ getRiskText(detailData.risk_level) }})
+              </span>
+            </a-descriptions-item>
+            <a-descriptions-item label="备注">
+              <a-textarea v-model:value="editForm.remark" :rows="3" placeholder="请输入备注" />
+            </a-descriptions-item>
+          </a-descriptions>
+          <div style="margin-top: 16px; text-align: right">
+            <a-button @click="cancelEdit" style="margin-right: 8px">取消</a-button>
+            <a-button type="primary" :loading="editLoading" @click="saveEdit">保存</a-button>
+          </div>
+        </div>
+      </div>
     </a-modal>
 
     <!-- 聊天记录弹窗 -->
@@ -221,6 +274,53 @@
         <a-button @click="chatRecordsVisible = false">关闭</a-button>
       </template>
     </a-modal>
+
+    <!-- 修改记录弹窗 -->
+    <a-modal style="top: 20px" v-model:open="modificationLogsVisible" title="修改记录" width="700px" :footer="null">
+      <div v-if="modificationLogsLoading" style="text-align: center; padding: 40px">
+        <a-spin />
+      </div>
+      <div v-else>
+        <a-timeline>
+          <!-- AI原始判断 -->
+          <a-timeline-item color="green">
+            <div style="margin-bottom: 8px">
+              <strong>AI智能质检</strong>
+              <a-tag color="green" size="small" style="margin-left: 8px">初始</a-tag>
+            </div>
+            <div>
+              风险等级：<a-tag :color="getRiskColor(detailData.risk_level)" size="small">{{ getRiskText(detailData.risk_level) }}</a-tag>
+            </div>
+          </a-timeline-item>
+          <!-- 人工修改记录 -->
+          <a-timeline-item v-for="(log, idx) in modificationLogsData" :key="idx" :color="idx === 0 ? 'blue' : 'gray'">
+            <div style="margin-bottom: 8px">
+              <strong>{{ log.user_name || log.user_id }}</strong>
+              <span style="color: #999; margin-left: 8px">{{ formatModTime(log.modified_at) }}</span>
+            </div>
+            <div v-if="log.old_risk_level !== log.new_risk_level" style="margin-bottom: 4px">
+              风险等级：<a-tag :color="getRiskColor(log.old_risk_level)" size="small">{{ getRiskText(log.old_risk_level) }}</a-tag>
+              <span style="margin: 0 4px">→</span>
+              <a-tag :color="getRiskColor(log.new_risk_level)" size="small">{{ getRiskText(log.new_risk_level) }}</a-tag>
+            </div>
+            <div v-if="log.old_remark !== log.new_remark">
+              <div style="margin-bottom: 4px; color: #666">备注修改：</div>
+              <div v-if="log.old_remark" style="margin-bottom: 4px; padding: 8px; background: #f5f5f5; border-radius: 4px">
+                <div style="color: #999; font-size: 12px; margin-bottom: 4px">原备注：</div>
+                <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ log.old_remark }}</pre>
+              </div>
+              <div v-if="log.new_remark" style="padding: 8px; background: #e6f7ff; border-radius: 4px">
+                <div style="color: #999; font-size: 12px; margin-bottom: 4px">新备注：</div>
+                <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ log.new_remark }}</pre>
+              </div>
+            </div>
+          </a-timeline-item>
+        </a-timeline>
+      </div>
+      <template #footer>
+        <a-button @click="modificationLogsVisible = false">关闭</a-button>
+      </template>
+    </a-modal>
   </div>
 </template>
 
@@ -228,7 +328,7 @@
 import { ref, reactive, onMounted, watch, nextTick } from 'vue'
 import { message } from 'ant-design-vue'
 import * as echarts from 'echarts'
-import { getQualityCheckList, getQualityCheckStats, exportQualityCheckResults, getActiveKeywords, getQualityCheckChatRecords } from '@/api/qualitycheck'
+import { getQualityCheckList, getQualityCheckStats, exportQualityCheckResults, getActiveKeywords, getQualityCheckChatRecords, updateQualityCheckResult, getQualityCheckModificationLogs } from '@/api/qualitycheck'
 
 // 关键词缓存配置
 const KEYWORDS_CACHE_KEY = 'qc_keywords_cache'
@@ -288,7 +388,6 @@ const pagination = reactive({
 })
 
 const columns = [
-  // 时间列：格式化时间 + 最小宽度
   { title: '时间', dataIndex: 'created_at', key: 'created_at', minWidth: 160, ellipsis: true},
   { title: '销售', key: 'user_name', minWidth: 130, ellipsis: true },
   { title: '好友', key: 'friend_name', minWidth: 130, ellipsis: true },
@@ -301,18 +400,32 @@ const columns = [
   { title: '检测关键词', key: 'detected_keywords', minWidth: 150, ellipsis: true },
   { title: '风险描述', key: 'risk_description', ellipsis: true }, // 无宽度，自适应
   { title: '风险类别', dataIndex: 'risk_category', key: 'risk_category', minWidth: 100 },
-  { title: '操作', key: 'actions', width: 80, fixed: 'right' }, // 仅操作列固定宽度
+  { title: '备注', dataIndex: 'remark', key: 'remark', width: 150, ellipsis: true },
+  { title: '操作', key: 'actions', width: 80, fixed: 'right' },
 ]
 
 // 详情
 const detailVisible = ref(false)
 const detailData = ref(null)
 
+// 编辑模式
+const editMode = ref(false)
+const editForm = reactive({
+  risk_level: '',
+  remark: ''
+})
+const editLoading = ref(false)
+
 // 聊天记录弹窗
 const chatRecordsVisible = ref(false)
 const chatRecordsLoading = ref(false)
 const chatRecordsData = ref([])
 const chatRecordsTotal = ref(0)
+
+// 修改记录弹窗
+const modificationLogsVisible = ref(false)
+const modificationLogsLoading = ref(false)
+const modificationLogsData = ref([])
 
 // 风险等级映射
 function getRiskColor(level) {
@@ -530,6 +643,44 @@ function handleTableChange(pag) {
 function showDetail(record) {
   detailData.value = record
   detailVisible.value = true
+  editMode.value = false
+}
+
+// 进入编辑模式
+function enterEditMode() {
+  editForm.risk_level = detailData.value.modified_risk_level || detailData.value.risk_level
+  editForm.remark = detailData.value.remark || ''
+  editMode.value = true
+}
+
+// 取消编辑
+function cancelEdit() {
+  editMode.value = false
+}
+
+// 保存编辑
+async function saveEdit() {
+  editLoading.value = true
+  try {
+    const res = await updateQualityCheckResult(detailData.value.id, {
+      risk_level: editForm.risk_level,
+      remark: editForm.remark
+    })
+    if (res.error) {
+      message.error(res.error)
+    } else {
+      message.success('修改成功')
+      detailData.value = res.data
+      editMode.value = false
+      // 刷新列表数据
+      loadData()
+      loadStats()
+    }
+  } catch {
+    message.error('修改失败')
+  } finally {
+    editLoading.value = false
+  }
 }
 
 // 查看聊天记录
@@ -547,6 +698,22 @@ async function showChatRecords() {
     chatRecordsTotal.value = 0
   } finally {
     chatRecordsLoading.value = false
+  }
+}
+
+// 查看修改记录
+async function showModificationLogs() {
+  if (!detailData.value) return
+  modificationLogsVisible.value = true
+  modificationLogsLoading.value = true
+  modificationLogsData.value = []
+  try {
+    const res = await getQualityCheckModificationLogs(detailData.value.id)
+    modificationLogsData.value = res.data || []
+  } catch {
+    modificationLogsData.value = []
+  } finally {
+    modificationLogsLoading.value = false
   }
 }
 
@@ -579,6 +746,19 @@ function formatChatTime(time) {
   const month = (date.getMonth() + 1).toString().padStart(2, '0')
   const day = date.getDate().toString().padStart(2, '0')
   return `${month}-${day} ${hours}:${minutes}`
+}
+
+// 格式化修改记录时间（2026-06-03 15:41:10）
+function formatModTime(time) {
+  if (!time) return ''
+  const date = new Date(time)
+  const year = date.getFullYear()
+  const month = (date.getMonth() + 1).toString().padStart(2, '0')
+  const day = date.getDate().toString().padStart(2, '0')
+  const hours = date.getHours().toString().padStart(2, '0')
+  const minutes = date.getMinutes().toString().padStart(2, '0')
+  const seconds = date.getSeconds().toString().padStart(2, '0')
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
 }
 
 // 导出

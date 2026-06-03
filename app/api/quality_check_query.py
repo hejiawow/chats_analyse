@@ -3,6 +3,7 @@
 import io
 import csv
 from datetime import datetime
+from pydantic import BaseModel
 from fastapi import APIRouter, Query, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, and_, or_
@@ -10,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from app.models.database import async_session
-from app.models.result import QualityCheckResult
+from app.models.result import QualityCheckResult, QualityCheckModificationLog
 from app.services.dependencies import require_permission, get_current_user
 from app.services.cache import cache_get, cache_set, cache_delete, cache_clear_pattern
 from app.services.hujing_api import get_chat_records
@@ -382,3 +383,88 @@ def invalidate_quality_check_stats_cache(user_id: str = None) -> None:
         cache_delete("quality_check:stats")
         # 清除所有用户的缓存（模式匹配）
         cache_clear_pattern("quality_check:stats:*")
+
+
+class QualityCheckUpdateRequest(BaseModel):
+    risk_level: str | None = None
+    remark: str | None = None
+
+
+@router.put("/quality-check/{result_id}")
+async def update_quality_check_result(
+    result_id: int,
+    request: QualityCheckUpdateRequest,
+    current_user: dict = Depends(require_permission("update:quality_check")),
+):
+    """修改质检结果的风险等级和备注（带审计日志）"""
+    async with async_session() as session:
+        # 1. 获取原记录
+        stmt = select(QualityCheckResult).where(QualityCheckResult.id == result_id)
+        result = await session.execute(stmt)
+        record = result.scalar_one_or_none()
+
+        if not record:
+            return {"error": "记录不存在"}
+
+        # 2. 检查是否有实际修改
+        has_change = False
+        old_risk_level = record.modified_risk_level or record.risk_level
+        old_remark = record.remark or ""
+
+        new_risk_level = request.risk_level if request.risk_level is not None else old_risk_level
+        new_remark = request.remark if request.remark is not None else old_remark
+
+        if new_risk_level != old_risk_level or new_remark != old_remark:
+            has_change = True
+
+        if not has_change:
+            return {"message": "无实际修改", "data": record.to_dict()}
+
+        # 3. 写入审计日志
+        log = QualityCheckModificationLog(
+            result_id=result_id,
+            user_id=str(current_user["user_id"]),
+            user_name=current_user["username"],
+            old_risk_level=old_risk_level,
+            new_risk_level=new_risk_level,
+            old_remark=old_remark,
+            new_remark=new_remark,
+            modified_at=datetime.now(),
+        )
+        session.add(log)
+
+        # 4. 更新主记录
+        record.remark = new_remark
+        record.modified_risk_level = new_risk_level
+        record.modified_at = datetime.now()
+        record.modified_by = str(current_user["user_id"])
+        record.modified_by_name = current_user["username"]
+
+        await session.commit()
+
+        # 5. 清除统计缓存
+        invalidate_quality_check_stats_cache()
+
+        return {
+            "message": "修改成功",
+            "data": record.to_dict(),
+        }
+
+
+@router.get("/quality-check/{result_id}/modification-logs")
+async def get_quality_check_modification_logs(
+    result_id: int,
+    current_user: dict = Depends(require_permission("read:quality_check")),
+):
+    """获取质检结果的修改记录（审计日志）"""
+    async with async_session() as session:
+        stmt = select(QualityCheckModificationLog).where(
+            QualityCheckModificationLog.result_id == result_id
+        ).order_by(QualityCheckModificationLog.modified_at.desc())
+        result = await session.execute(stmt)
+        logs = result.scalars().all()
+
+        return {
+            "total": len(logs),
+            "data": [log.to_dict() for log in logs],
+        }
