@@ -17,26 +17,31 @@ router = APIRouter()
 async def list_active_keywords(
     current_user: dict = Depends(require_permission("read:quality_check")),
 ):
-    """获取启用的关键词列表（用于筛选下拉框）"""
+    """获取启用的关键词列表（按类别分组）"""
     async with async_session() as session:
         stmt = select(RiskKeyword).where(RiskKeyword.is_active == True)
-        stmt = stmt.order_by(RiskKeyword.keyword)
+        stmt = stmt.order_by(RiskKeyword.category, RiskKeyword.keyword)
         result = await session.execute(stmt)
         records = result.scalars().all()
 
-        keywords = [r.keyword for r in records]
+        # 按类别分组
+        grouped = {}
+        for r in records:
+            if r.category not in grouped:
+                grouped[r.category] = []
+            grouped[r.category].append(r.keyword)
 
-        # 如果数据库没有数据，返回默认关键词
-        if not keywords:
-            keywords = [
-                "退款", "退费", "退掉", "退钱", "返还",
-                "投诉", "举报", "告你们", "投诉你们",
-                "取消订单", "退订", "不买了", "不想买了",
-                "工商", "消费者协会", "消协", "12315", "市场监管局",
-                "骗人", "骗子", "欺诈", "虚假宣传", "承诺没兑现",
-            ]
+        # 如果数据库没有数据，返回默认分组
+        if not grouped:
+            grouped = {
+                "refund": ["退款", "退费", "退掉", "退钱", "返还"],
+                "complaint": ["投诉", "举报", "告你们", "投诉你们"],
+                "order_cancel": ["取消订单", "退订", "不买了", "不想买了"],
+                "regulatory": ["工商", "消费者协会", "消协", "12315", "市场监管局"],
+                "fraud": ["骗人", "骗子", "欺诈", "虚假宣传", "承诺没兑现"],
+            }
 
-        return {"data": keywords}
+        return {"data": grouped}
 
 
 @router.get("/keywords")
