@@ -91,3 +91,11 @@ export const getActiveKeywords = () =>
 // 批量获取好友列表
 export const getFriendsBatch = (user_ids) =>
   request.post('/api/friends/batch', { user_ids })
+
+// 修改质检结果（风险等级、备注）
+export const updateQualityCheckResult = (id, data) =>
+  request.put(`/api/quality-check/${id}`, data)
+
+// 获取质检结果修改记录（审计日志）
+export const getQualityCheckModificationLogs = (resultId) =>
+  request.get(`/api/quality-check/${resultId}/modification-logs`)
