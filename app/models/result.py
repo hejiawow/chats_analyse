@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """分析结果数据模型 — 拆分为转介绍检测和优秀案例提取两张表"""
-from sqlalchemy import Column, BigInteger, Integer, String, Text, DateTime, Boolean, Index, ForeignKey
+from sqlalchemy import Column, BigInteger, Integer, String, Text, DateTime, Boolean, Index, ForeignKey, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime, timezone
 
@@ -229,6 +229,69 @@ class RiskKeyword(Base):
         }
 
 
+class QualityCheckTask(Base):
+    """质检任务表 — 记录每次发起的批量质检任务元信息"""
+    __tablename__ = "quality_check_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    batch_task_id = Column(String(64), unique=True, nullable=False, comment="批次号（UUID）")
+    status = Column(String(16), default="pending", comment="任务状态：pending/running/completed/cancelled/error/no_pairs/no_matches")
+
+    # === 任务参数 ===
+    start_time = Column(String(32), nullable=True, comment="检测起始时间（用户选择的）")
+    end_time = Column(String(32), nullable=True, comment="检测结束时间（用户选择的）")
+    user_id_filter = Column(String(64), nullable=True, comment="销售ID筛选（可选）")
+
+    # === 进度与统计 ===
+    total_pairs = Column(Integer, default=0, comment="待分析总条数")
+    completed_pairs = Column(Integer, default=0, comment="已完成条数")
+    risk_detected = Column(Integer, default=0, comment="检出风险条数")
+    no_chat_count = Column(Integer, default=0, comment="无聊天记录条数")
+    failed_count = Column(Integer, default=0, comment="分析失败条数")
+    cancelled_count = Column(Integer, default=0, comment="被取消条数")
+    filtered_count = Column(Integer, default=0, comment="被协议退费过滤条数")
+    error_message = Column(Text, nullable=True, comment="错误信息（API失败等）")
+
+    # === 触发信息 ===
+    triggered_by = Column(String(64), nullable=True, comment="触发人（CLI/API/cron）")
+
+    # === 时间 ===
+    created_at = Column(DateTime, default=lambda: datetime.now(), comment="任务发起时间")
+    finished_at = Column(DateTime, nullable=True, comment="任务结束时间")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "batch_task_id": self.batch_task_id,
+            "status": self.status,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "user_id_filter": self.user_id_filter,
+            "total_pairs": self.total_pairs,
+            "completed_pairs": self.completed_pairs,
+            "risk_detected": self.risk_detected,
+            "no_chat_count": self.no_chat_count,
+            "failed_count": self.failed_count,
+            "cancelled_count": self.cancelled_count,
+            "filtered_count": self.filtered_count,
+            "error_message": self.error_message,
+            "triggered_by": self.triggered_by,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "finished_at": self.finished_at.isoformat() if self.finished_at else None,
+            # 计算耗时（秒）
+            "duration_seconds": (
+                int((self.finished_at - self.created_at).total_seconds())
+                if self.finished_at and self.created_at else None
+            ),
+        }
+
+    __table_args__ = (
+        Index("ix_quality_check_task_batch_id", "batch_task_id"),
+        Index("ix_quality_check_task_status", "status"),
+        Index("ix_quality_check_task_created", "created_at"),
+    )
+
+
 class QualityCheckResult(Base):
     """质检检测结果表 — 关键词预警 + AI深度分析"""
     __tablename__ = "quality_check_results"
@@ -246,9 +309,6 @@ class QualityCheckResult(Base):
     phone = Column(String(32), nullable=True, comment="绑定手机号")
     remark_phone = Column(String(32), nullable=True, comment="备注手机号")
 
-    # === 时间范围 ===
-    check_time_start = Column(String(32), nullable=True, comment="检测起始时间")
-    check_time_end = Column(String(32), nullable=True, comment="检测结束时间")
     chat_record_count = Column(Integer, nullable=True, comment="聊天记录条数")
 
     # === 关键词检测结果 ===
@@ -264,7 +324,7 @@ class QualityCheckResult(Base):
     # === 状态 ===
     status = Column(String(16), default="success", comment="success/failed/no_chat/no_keyword")
     error_msg = Column(Text, nullable=True, comment="失败原因")
-    batch_task_id = Column(String(64), nullable=True, comment="批量任务ID")
+    task_id = Column(Integer, ForeignKey("quality_check_tasks.id", ondelete="SET NULL"), nullable=True, comment="关联质检任务ID")
 
     # === 人工修正字段 ===
     remark = Column(Text, nullable=True, comment="质检备注")
@@ -289,8 +349,6 @@ class QualityCheckResult(Base):
             "alias": self.alias,
             "phone": self.phone,
             "remark_phone": self.remark_phone,
-            "check_time_start": self.check_time_start,
-            "check_time_end": self.check_time_end,
             "chat_record_count": self.chat_record_count,
             "keyword_detected": self.keyword_detected,
             "detected_keywords": self.detected_keywords,
@@ -300,7 +358,7 @@ class QualityCheckResult(Base):
             "trigger_party": self.trigger_party,
             "status": self.status,
             "error_msg": self.error_msg,
-            "batch_task_id": self.batch_task_id,
+            "task_id": self.task_id,
             "remark": self.remark,
             "modified_risk_level": self.modified_risk_level,
             "modified_at": self.modified_at.isoformat() if self.modified_at else None,
@@ -317,6 +375,7 @@ class QualityCheckResult(Base):
         Index("ix_quality_check_created_at", "created_at"),
         Index("ix_quality_check_user_created", "user_id", "created_at"),
         Index("ix_quality_check_trigger_party", "trigger_party"),
+        Index("ix_quality_check_task_id", "task_id"),
     )
 
 

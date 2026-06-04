@@ -250,8 +250,8 @@
       <div v-else class="chat-records-list">
         <div class="chat-records-header">
           共 {{ chatRecordsTotal }} 条聊天记录
-          <span v-if="detailData" style="margin-left: 12px; color: #666">
-            时间范围：{{ formatDateTime(detailData.check_time_start) }} ~ {{ formatDateTime(detailData.check_time_end) }}
+          <span v-if="chatRecordsTimeRange" style="margin-left: 12px; color: #666">
+            时间范围：{{ formatDateTime(chatRecordsTimeRange.start) }} ~ {{ formatDateTime(chatRecordsTimeRange.end) }}
           </span>
         </div>
         <div class="chat-records-content">
@@ -421,6 +421,7 @@ const chatRecordsVisible = ref(false)
 const chatRecordsLoading = ref(false)
 const chatRecordsData = ref([])
 const chatRecordsTotal = ref(0)
+const chatRecordsTimeRange = ref(null)
 
 // 修改记录弹窗
 const modificationLogsVisible = ref(false)
@@ -700,13 +701,16 @@ async function showChatRecords() {
   chatRecordsVisible.value = true
   chatRecordsLoading.value = true
   chatRecordsData.value = []
+  chatRecordsTimeRange.value = null
   try {
     const res = await getQualityCheckChatRecords(detailData.value.id)
     chatRecordsData.value = res.data || []
     chatRecordsTotal.value = res.total || 0
+    chatRecordsTimeRange.value = res.time_range || null
   } catch {
     chatRecordsData.value = []
     chatRecordsTotal.value = 0
+    chatRecordsTimeRange.value = null
   } finally {
     chatRecordsLoading.value = false
   }
