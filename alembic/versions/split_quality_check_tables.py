@@ -26,6 +26,14 @@ def upgrade() -> None:
     inspector = sa.inspect(conn)
     table_exists = 'quality_check_details' in inspector.get_table_names()
 
+    # 检查表结构是否完整（是否有 suggested_action 列）
+    if table_exists:
+        detail_columns = {c['name'] for c in inspector.get_columns('quality_check_details')}
+        if 'suggested_action' not in detail_columns:
+            # 表结构不完整，删除重建
+            op.drop_table('quality_check_details')
+            table_exists = False
+
     # 1. 创建详情表 quality_check_details（如不存在）
     if not table_exists:
         op.create_table(
