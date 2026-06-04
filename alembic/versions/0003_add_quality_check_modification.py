@@ -8,7 +8,7 @@
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0003_add_quality_check_modification"
+revision = "0003_quality_mod"
 down_revision = "0002_add_trigger_party"
 branch_labels = None
 depends_on = None
