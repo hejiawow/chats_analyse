@@ -152,6 +152,7 @@
         </template>
         <template v-if="column.key === 'actions'">
           <a-button size="small" type="link" @click="showDetail(record)">详情</a-button>
+          <a-button size="small" type="link" @click="showEdit(record)">编辑</a-button>
         </template>
       </template>
     </a-table>
@@ -410,7 +411,7 @@ const columns = [
   { title: '风险描述', key: 'risk_description', width: 200 }, // 无宽度，自适应
   { title: '风险类别', dataIndex: 'risk_category', key: 'risk_category', minWidth: 100 },
   { title: '备注', dataIndex: 'remark', key: 'remark', width: 150, ellipsis: true },
-  { title: '操作', key: 'actions', width: 80, fixed: 'right' },
+  { title: '操作', key: 'actions', width: 110, fixed: 'right' },
 ]
 
 // 详情
@@ -419,6 +420,7 @@ const detailData = ref(null)
 
 // 编辑模式
 const editMode = ref(false)
+const editFromDetail = ref(false)  // 标记编辑入口是否来自详情弹窗
 const editForm = reactive({
   risk_level: '',
   remark: ''
@@ -653,16 +655,31 @@ function showDetail(record) {
   editMode.value = false
 }
 
-// 进入编辑模式
+// 从表格直接打开编辑模式
+function showEdit(record) {
+  detailData.value = record
+  editForm.risk_level = record.modified_risk_level || record.risk_level
+  editForm.remark = record.remark || ''
+  editFromDetail.value = false  // 标记来源为表格
+  editMode.value = true
+  detailVisible.value = true
+}
+
+// 从详情弹窗进入编辑模式
 function enterEditMode() {
   editForm.risk_level = detailData.value.modified_risk_level || detailData.value.risk_level
   editForm.remark = detailData.value.remark || ''
+  editFromDetail.value = true  // 标记来源为详情弹窗
   editMode.value = true
 }
 
 // 取消编辑
 function cancelEdit() {
   editMode.value = false
+  if (!editFromDetail.value) {
+    // 从表格进入的编辑，关闭弹窗
+    detailVisible.value = false
+  }
 }
 
 // 保存编辑
@@ -679,6 +696,10 @@ async function saveEdit() {
       message.success('修改成功')
       detailData.value = res.data
       editMode.value = false
+      if (!editFromDetail.value) {
+        // 从表格进入的编辑，关闭弹窗
+        detailVisible.value = false
+      }
       // 刷新列表数据
       loadData()
       loadStats()
