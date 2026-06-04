@@ -136,7 +136,7 @@
           <span :title="record.detected_keywords">{{ record.detected_keywords || '无' }}</span>
         </template>
         <template v-if="column.key === 'risk_description'">
-          <span :title="record.risk_description">{{ record.risk_description || '-' }}</span>
+          <span class="table-risk-desc" :title="record.risk_description">{{ record.risk_description || '-' }}</span>
         </template>
         <template v-if="column.key === 'remark'">
           <span :title="record.remark">{{ record.remark || '-' }}</span>
@@ -192,10 +192,22 @@
             </a-descriptions-item>
             <a-descriptions-item v-if="detailData.risk_category" label="风险类别">{{ detailData.risk_category }}</a-descriptions-item>
             <a-descriptions-item label="风险描述">
-              <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.risk_description || '-' }}</pre>
+              <a-tooltip v-if="detailData.risk_description && detailData.risk_description.length > 100" placement="topLeft" :overlayStyle="{ maxWidth: '500px' }">
+                <template #title>
+                  <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.risk_description }}</pre>
+                </template>
+                <pre class="risk-desc-preview">{{ detailData.risk_description }}</pre>
+              </a-tooltip>
+              <pre v-else style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.risk_description || '-' }}</pre>
             </a-descriptions-item>
             <a-descriptions-item label="建议措施">
-              <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.suggested_action || '-' }}</pre>
+              <a-tooltip v-if="detailData.suggested_action && detailData.suggested_action.length > 100" placement="topLeft" :overlayStyle="{ maxWidth: '500px' }">
+                <template #title>
+                  <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.suggested_action }}</pre>
+                </template>
+                <pre class="risk-desc-preview">{{ detailData.suggested_action }}</pre>
+              </a-tooltip>
+              <pre v-else style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.suggested_action || '-' }}</pre>
             </a-descriptions-item>
             <a-descriptions-item label="备注">
               <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.remark || '-' }}</pre>
@@ -393,7 +405,7 @@ const columns = [
   { title: '风险等级', key: 'risk_level', minWidth: 100 },
   { title: '触发方', dataIndex: 'trigger_party', key: 'trigger_party', width: 100 },
   { title: '检测关键词', key: 'detected_keywords', minWidth: 150, ellipsis: true },
-  { title: '风险描述', key: 'risk_description', ellipsis: true }, // 无宽度，自适应
+  { title: '风险描述', key: 'risk_description', width: 200 }, // 无宽度，自适应
   { title: '风险类别', dataIndex: 'risk_category', key: 'risk_category', minWidth: 100 },
   { title: '备注', dataIndex: 'remark', key: 'remark', width: 150, ellipsis: true },
   { title: '操作', key: 'actions', width: 80, fixed: 'right' },
@@ -1048,5 +1060,33 @@ onMounted(() => {
 .qr-keywords-content-cell .ant-checkbox + span {
   padding-right: 0;
   line-height: 1.5;
+}
+
+/* 风险描述/建议措施预览样式：限制高度，超长省略 */
+.risk-desc-preview {
+  white-space: pre-wrap;
+  margin: 0;
+  word-break: break-word;
+  max-height: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  cursor: pointer;
+}
+
+/* 表格风险描述列：小字体、最多两行 */
+.table-risk-desc {
+  font-size: 12px;
+  color: #666;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.4;
 }
 </style>
