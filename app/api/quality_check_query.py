@@ -43,9 +43,18 @@ def escape_like_pattern(pattern: str) -> str:
 
 
 def _build_risk_keyword_filter(stmt, risk_levels: List[str] | None, keywords: List[str] | None):
-    """Build risk level and keyword filter conditions"""
+    """Build risk level and keyword filter conditions
+
+    风险等级筛选逻辑：使用"有效风险等级" = COALESCE(modified_risk_level, risk_level)
+    即优先使用人工修正后的等级，若无修正则使用原始等级
+    """
     if risk_levels:
-        stmt = stmt.where(QualityCheckResult.risk_level.in_(risk_levels))
+        # 使用 COALESCE 函数：modified_risk_level 优先，否则使用 risk_level
+        effective_risk_level = func.coalesce(
+            QualityCheckResult.modified_risk_level,
+            QualityCheckResult.risk_level
+        )
+        stmt = stmt.where(effective_risk_level.in_(risk_levels))
     if keywords:
         keyword_conditions = [
             QualityCheckResult.detected_keywords.ilike(f"%{escape_like_pattern(kw)}%", escape="\\")
@@ -177,11 +186,15 @@ async def get_quality_check_stats(
             count_stmt = count_stmt.where(time_filter)
         total = await session.scalar(count_stmt)
 
-        # 风险等级分布
+        # 风险等级分布（使用有效风险等级 = COALESCE(modified_risk_level, risk_level))
+        effective_risk_level = func.coalesce(
+            QualityCheckResult.modified_risk_level,
+            QualityCheckResult.risk_level
+        )
         risk_stmt = select(
-            QualityCheckResult.risk_level,
+            effective_risk_level.label("risk_level"),
             func.count().label("count")
-        ).group_by(QualityCheckResult.risk_level)
+        ).group_by(effective_risk_level)
         if user_id_filter:
             risk_stmt = risk_stmt.where(QualityCheckResult.user_id == user_id_filter)
         if friend_id is not None:
