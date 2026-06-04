@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from app.models.database import async_session
-from app.models.result import QualityCheckResult, QualityCheckModificationLog
+from app.models.result import QualityCheckResult, QualityCheckModificationLog, QualityCheckDetail
 from app.services.dependencies import require_permission, get_current_user
 from app.services.cache import cache_get, cache_set, cache_delete, cache_clear_pattern
 from app.services.hujing_api import get_chat_records
@@ -285,7 +285,7 @@ async def export_quality_check_results(
         "ID", "销售ID", "好友ID", "好友姓名", "好友备注", "好友别名", "绑定手机号", "备注手机号",
         "检测时间范围", "聊天记录数",
         "关键词检测", "检测关键词", "风险等级", "触发方", "风险类别",
-        "风险描述", "建议措施", "创建时间"
+        "风险描述", "创建时间"
     ])
 
     # 数据行
@@ -307,7 +307,6 @@ async def export_quality_check_results(
             r.trigger_party or "",
             r.risk_category or "",
             r.risk_description or "",
-            r.suggested_action or "",
             r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else "",
         ])
 
@@ -362,8 +361,9 @@ async def get_quality_check_detail(
     result_id: int,
     current_user: dict = Depends(require_permission("read:quality_check")),
 ):
-    """获取单条质检检测结果"""
+    """获取单条质检检测结果（包含详情表的大字段）"""
     async with async_session() as session:
+        # 查询主表
         stmt = select(QualityCheckResult).where(QualityCheckResult.id == result_id)
         result = await session.execute(stmt)
         record = result.scalar_one_or_none()
@@ -371,7 +371,22 @@ async def get_quality_check_detail(
         if not record:
             return {"error": "记录不存在"}
 
-        return record.to_dict()
+        # 关联查询详情表（大字段）
+        detail_stmt = select(QualityCheckDetail).where(
+            QualityCheckDetail.result_id == result_id
+        )
+        detail_result = await session.execute(detail_stmt)
+        detail = detail_result.scalar_one_or_none()
+
+        # 合并返回
+        data = record.to_dict()
+        if detail:
+            data["keyword_matches"] = detail.keyword_matches
+            data["key_evidence"] = detail.key_evidence
+            data["suggested_action"] = detail.suggested_action
+            data["raw_response"] = detail.raw_response
+
+        return data
 
 
 def invalidate_quality_check_stats_cache(user_id: str = None) -> None:

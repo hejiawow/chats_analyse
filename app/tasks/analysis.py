@@ -10,7 +10,7 @@ from app.services.hujing_api import get_chat_records
 from app.services.datasource.manager import DataSourceManager
 from app.agents.registry import AgentRegistry
 import app.agents  # noqa: F401 - 触发所有 Agent 的注册
-from app.models.result import ReferralResult, CaseExtractionResult, SalesJourneyResult, FollowUpComplianceResult, QualityCheckResult
+from app.models.result import ReferralResult, CaseExtractionResult, SalesJourneyResult, FollowUpComplianceResult, QualityCheckResult, QualityCheckDetail
 from app.models.database import sync_engine
 from config import settings
 from app.services.log_service import log as _log, get_task_logs, mark_task_done, is_task_done, clear_task_logs
@@ -338,6 +338,7 @@ def run_analysis(self, task_id: str, user_id: str, friend_id: int,
                     _log(task_id, f"  [{agent_name}] 检测结果: {compliance_status}", "success")
 
                 elif agent_name == "质检检测":
+                    # 保存主表记录（不含大字段）
                     record = QualityCheckResult(
                         user_id=user_id,
                         user_wx_id=user_wx_id,
@@ -349,17 +350,28 @@ def run_analysis(self, task_id: str, user_id: str, friend_id: int,
                         chat_record_count=result.get("chat_record_count"),
                         keyword_detected=result.get("keyword_detected", "no"),
                         detected_keywords=result.get("detected_keywords"),
-                        keyword_matches=result.get("keyword_matches"),
                         risk_level=result.get("risk_level"),
                         risk_category=result.get("risk_category"),
+                        trigger_party=result.get("trigger_party"),
                         risk_description=result.get("risk_description"),
-                        suggested_action=result.get("suggested_action"),
-                        key_evidence=result.get("key_evidence"),
-                        raw_response=result.get("raw_response"),
                         status=result.get("status", "success"),
                         created_at=datetime.now(),
                     )
                     session.add(record)
+                    session.flush()  # 获取 record.id
+
+                    # 保存详情表记录（大字段）
+                    if result.get("keyword_matches") or result.get("key_evidence") or result.get("suggested_action") or result.get("raw_response"):
+                        detail = QualityCheckDetail(
+                            result_id=record.id,
+                            keyword_matches=result.get("keyword_matches"),
+                            key_evidence=result.get("key_evidence"),
+                            suggested_action=result.get("suggested_action"),
+                            raw_response=result.get("raw_response"),
+                            created_at=datetime.now(),
+                        )
+                        session.add(detail)
+
                     saved += 1
                     risk_level = result.get("risk_level", "none")
                     keyword_status = "检测到关键词" if result.get("keyword_detected") == "yes" else "无风险关键词"

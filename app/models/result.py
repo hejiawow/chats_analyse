@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """分析结果数据模型 — 拆分为转介绍检测和优秀案例提取两张表"""
-from sqlalchemy import Column, BigInteger, Integer, String, Text, DateTime, Boolean, Index
+from sqlalchemy import Column, BigInteger, Integer, String, Text, DateTime, Boolean, Index, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime, timezone
 
@@ -254,23 +254,17 @@ class QualityCheckResult(Base):
     # === 关键词检测结果 ===
     keyword_detected = Column(String(16), default="no", comment="yes/no 是否检测到关键词")
     detected_keywords = Column(String(512), nullable=True, comment="检测到的关键词列表（逗号分隔）")
-    keyword_matches = Column(JSONB, nullable=True, comment="关键词匹配详情：[{keyword, message, time, speaker}]")
 
     # === AI深度分析结果 ===
     risk_level = Column(String(16), nullable=True, comment="风险等级：high/medium/low/none")
     risk_category = Column(String(64), nullable=True, comment="风险类别：投诉/退款/退费/取消订单等")
     risk_description = Column(Text, nullable=True, comment="风险描述")
-    suggested_action = Column(Text, nullable=True, comment="建议处理措施")
-    key_evidence = Column(JSONB, nullable=True, comment="关键证据：[{content, time, speaker}]")
-
-    # === 原始数据 ===
-    raw_response = Column(Text, nullable=True, comment="AI原始响应")
+    trigger_party = Column(String(16), nullable=True, comment="触发方：sales/customer/both")
 
     # === 状态 ===
     status = Column(String(16), default="success", comment="success/failed/no_chat/no_keyword")
     error_msg = Column(Text, nullable=True, comment="失败原因")
     batch_task_id = Column(String(64), nullable=True, comment="批量任务ID")
-    trigger_party = Column(String(16), nullable=True, comment="触发方：sales/customer/both")
 
     # === 人工修正字段 ===
     remark = Column(Text, nullable=True, comment="质检备注")
@@ -300,17 +294,13 @@ class QualityCheckResult(Base):
             "chat_record_count": self.chat_record_count,
             "keyword_detected": self.keyword_detected,
             "detected_keywords": self.detected_keywords,
-            "keyword_matches": self.keyword_matches,
             "risk_level": self.risk_level,
             "risk_category": self.risk_category,
             "risk_description": self.risk_description,
-            "suggested_action": self.suggested_action,
-            "key_evidence": self.key_evidence,
-            "raw_response": self.raw_response,
+            "trigger_party": self.trigger_party,
             "status": self.status,
             "error_msg": self.error_msg,
             "batch_task_id": self.batch_task_id,
-            "trigger_party": self.trigger_party,
             "remark": self.remark,
             "modified_risk_level": self.modified_risk_level,
             "modified_at": self.modified_at.isoformat() if self.modified_at else None,
@@ -381,3 +371,34 @@ class QualityCheckModificationLog(Base):
             "new_remark": self.new_remark,
             "modified_at": self.modified_at.isoformat() if self.modified_at else None,
         }
+
+
+class QualityCheckDetail(Base):
+    """质检结果详情表 — 存储大字段，点击详情时关联查询"""
+    __tablename__ = "quality_check_details"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    result_id = Column(Integer, ForeignKey("quality_check_results.id"), nullable=False, unique=True, comment="关联质检结果ID")
+
+    # === 大字段 ===
+    keyword_matches = Column(JSONB, nullable=True, comment="关键词匹配详情：[{keyword, message, time, speaker}]")
+    key_evidence = Column(JSONB, nullable=True, comment="关键证据：[{content, time, speaker}]")
+    suggested_action = Column(Text, nullable=True, comment="建议处理措施")
+    raw_response = Column(Text, nullable=True, comment="AI原始响应")
+
+    created_at = Column(DateTime, default=lambda: datetime.now(), comment="创建时间")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "result_id": self.result_id,
+            "keyword_matches": self.keyword_matches,
+            "key_evidence": self.key_evidence,
+            "suggested_action": self.suggested_action,
+            "raw_response": self.raw_response,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+    __table_args__ = (
+        Index("ix_quality_check_detail_result_id", "result_id"),
+    )

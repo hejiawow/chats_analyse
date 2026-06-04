@@ -328,7 +328,7 @@
 import { ref, reactive, onMounted, watch, nextTick } from 'vue'
 import { message } from 'ant-design-vue'
 import * as echarts from 'echarts'
-import { getQualityCheckList, getQualityCheckStats, exportQualityCheckResults, getActiveKeywords, getQualityCheckChatRecords, updateQualityCheckResult, getQualityCheckModificationLogs } from '@/api/qualitycheck'
+import { getQualityCheckList, getQualityCheckStats, exportQualityCheckResults, getActiveKeywords, getQualityCheckChatRecords, updateQualityCheckResult, getQualityCheckModificationLogs, getQualityCheckDetail } from '@/api/qualitycheck'
 
 // 关键词缓存配置
 const KEYWORDS_CACHE_KEY = 'qc_keywords_cache'
@@ -453,6 +453,7 @@ function formatDateTime(isoString) {
   } catch {
     return isoString
   }
+}
 // 触发方颜色映射
 const getTriggerPartyColor = (trigger_party) => {
   const colorMap = {
@@ -640,10 +641,20 @@ function handleTableChange(pag) {
 }
 
 // 详情
-function showDetail(record) {
-  detailData.value = record
+async function showDetail(record) {
   detailVisible.value = true
   editMode.value = false
+  // 调用详情API获取完整数据（包含大字段）
+  try {
+    const res = await getQualityCheckDetail(record.id)
+    if (res.error) {
+      detailData.value = record  // 如果API失败，使用列表数据
+    } else {
+      detailData.value = res
+    }
+  } catch {
+    detailData.value = record  // 如果API失败，使用列表数据
+  }
 }
 
 // 进入编辑模式

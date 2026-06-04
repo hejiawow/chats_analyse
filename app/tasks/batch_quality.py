@@ -10,7 +10,7 @@ from app.celery_app import celery_app
 from app.services.hujing_api import get_chat_pairs, get_chat_records, get_all_chat_messages, get_all_sales, get_friends_list, get_chat_records_for_quality_check
 from app.agents.quality_check import quality_check_agent
 from app.models.database import sync_engine
-from app.models.result import QualityCheckResult
+from app.models.result import QualityCheckResult, QualityCheckDetail
 from config import settings
 from app.api.quality_check_query import invalidate_quality_check_stats_cache
 from app.services.cache import cache_clear_pattern
@@ -223,6 +223,7 @@ def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: in
             user_name = _get_user_name(user_id)
             friend_info = _get_friend_info(user_id, friend_id)
             with Session(sync_engine) as session:
+                # 保存主表记录（不含大字段）
                 record = QualityCheckResult(
                     user_id=user_id,
                     user_name=user_name,
@@ -237,19 +238,29 @@ def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: in
                     chat_record_count=result.get("chat_record_count", len(chat_records)),
                     keyword_detected=result.get("keyword_detected", "no"),
                     detected_keywords=result.get("detected_keywords"),
-                    keyword_matches=result.get("keyword_matches"),
                     risk_level=result.get("risk_level"),
                     risk_category=result.get("risk_category"),
                     trigger_party=result.get("trigger_party"),
                     risk_description=result.get("risk_description"),
-                    suggested_action=result.get("suggested_action"),
-                    key_evidence=result.get("key_evidence"),
-                    raw_response=result.get("raw_response"),
                     status=result.get("status", "success"),
                     batch_task_id=batch_task_id,
                     created_at=datetime.now(),
                 )
                 session.add(record)
+                session.flush()  # 获取 record.id
+
+                # 保存详情表记录（大字段）
+                if result.get("keyword_matches") or result.get("key_evidence") or result.get("suggested_action") or result.get("raw_response"):
+                    detail = QualityCheckDetail(
+                        result_id=record.id,
+                        keyword_matches=result.get("keyword_matches"),
+                        key_evidence=result.get("key_evidence"),
+                        suggested_action=result.get("suggested_action"),
+                        raw_response=result.get("raw_response"),
+                        created_at=datetime.now(),
+                    )
+                    session.add(detail)
+
                 session.commit()
 
         # 更新进度
@@ -425,6 +436,7 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
             user_name = _get_user_name(user_id)
             friend_info = _get_friend_info(user_id, friend_id)
             with Session(sync_engine) as session:
+                # 保存主表记录（不含大字段）
                 record = QualityCheckResult(
                     user_id=user_id,
                     user_name=user_name,
@@ -439,19 +451,29 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
                     chat_record_count=result.get("chat_record_count", len(chat_records)),
                     keyword_detected=result.get("keyword_detected", "no"),
                     detected_keywords=result.get("detected_keywords"),
-                    keyword_matches=result.get("keyword_matches"),
                     risk_level=result.get("risk_level"),
                     risk_category=result.get("risk_category"),
                     trigger_party=result.get("trigger_party"),
                     risk_description=result.get("risk_description"),
-                    suggested_action=result.get("suggested_action"),
-                    key_evidence=result.get("key_evidence"),
-                    raw_response=result.get("raw_response"),
                     status=result.get("status", "success"),
                     batch_task_id=batch_task_id,
                     created_at=datetime.now(),
                 )
                 session.add(record)
+                session.flush()  # 获取 record.id
+
+                # 保存详情表记录（大字段）
+                if result.get("keyword_matches") or result.get("key_evidence") or result.get("suggested_action") or result.get("raw_response"):
+                    detail = QualityCheckDetail(
+                        result_id=record.id,
+                        keyword_matches=result.get("keyword_matches"),
+                        key_evidence=result.get("key_evidence"),
+                        suggested_action=result.get("suggested_action"),
+                        raw_response=result.get("raw_response"),
+                        created_at=datetime.now(),
+                    )
+                    session.add(detail)
+
                 session.commit()
         else:
             _log(batch_task_id, f"[正常] 销售:{user_id} 好友:{friend_id} 未检测到风险关键词", "info")
