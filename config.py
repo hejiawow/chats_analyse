@@ -2,6 +2,7 @@
 """全局配置"""
 import os
 import sys
+from datetime import datetime, timezone, timedelta
 
 # 强制使用 UTF-8 编码（解决 Windows 中文系统 psycopg2 编码问题）
 os.environ['PYTHONIOENCODING'] = 'utf-8'
@@ -9,6 +10,22 @@ if sys.platform == 'win32':
     os.environ['PGCLIENTENCODING'] = 'UTF8'
 
 from pydantic_settings import BaseSettings
+
+
+# 东八区时区常量（UTC+8）
+TZ_SHANGHAI = timezone(timedelta(hours=8))
+
+
+def now_shanghai() -> datetime:
+    """获取东八区当前时间（带时区信息）"""
+    return datetime.now(TZ_SHANGHAI)
+
+
+def to_naive_shanghai(dt: datetime) -> datetime:
+    """将带时区的 datetime 转换为东八区 naive datetime（用于数据库存储）"""
+    if dt.tzinfo is None:
+        return dt  # 已经是 naive，假设是东八区
+    return dt.astimezone(TZ_SHANGHAI).replace(tzinfo=None)
 
 
 class Settings(BaseSettings):
@@ -29,6 +46,10 @@ class Settings(BaseSettings):
     # AI Concurrency Control (分布式信号量限制并发调用)
     AI_MAX_CONCURRENT: int = 2  # 最大并发 AI 调用数（免费版 DashScope 只允许 1）
     AI_SEMAPHORE_TIMEOUT: int = 300  # 获取信号量超时时间（秒）
+
+    # 质检检测聊天记录配置
+    QUALITY_CHECK_CHAT_DAYS: int = 7  # 质检检测默认往前查询天数
+    QUALITY_CHECK_MAX_CHAT_RECORDS: int = 1000  # 质检检测最大聊天记录条数
 
     # Embedding (DashScope)
     EMBEDDING_MODEL: str = "text-embedding-v3"

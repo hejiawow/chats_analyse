@@ -133,7 +133,7 @@
             <a-tag :color="getRiskColor(record.display_risk_level || record.risk_level)">
               {{ getRiskText(record.display_risk_level || record.risk_level) }}
             </a-tag>
-            <a-tag v-if="record.modified_risk_level" color="purple" size="small" style="margin-left: 4px; font-size: 10px; padding: 0 3px">改</a-tag>
+            <a-tag v-if="record.modified_risk_level && record.modified_risk_level !== ''" color="purple" size="small" style="margin-left: 4px; font-size: 10px; padding: 0 3px">改</a-tag>
           </div>
         </template>
         <template v-if="column.key === 'trigger_party'">
@@ -189,9 +189,9 @@
                 <a-tag :color="getRiskColor(detailData.display_risk_level || detailData.risk_level)">
                   {{ getRiskText(detailData.display_risk_level || detailData.risk_level) }}
                 </a-tag>
-                <a-tag v-if="detailData.modified_risk_level" color="purple" style="margin-left: 4px">已修正</a-tag>
+                <a-tag v-if="detailData.modified_risk_level && detailData.modified_risk_level !== ''" color="purple" style="margin-left: 4px">已修正</a-tag>
               </div>
-              <div v-if="detailData.modified_risk_level" style="font-size: 12px; color: #999; margin-top: 4px">
+              <div v-if="detailData.modified_risk_level && detailData.modified_risk_level !== ''" style="font-size: 12px; color: #999; margin-top: 4px">
                 原始等级: {{ getRiskText(detailData.risk_level) }}
               </div>
             </a-descriptions-item>

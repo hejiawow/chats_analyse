@@ -2,9 +2,10 @@
 """分析结果数据模型 — 拆分为转介绍检测和优秀案例提取两张表"""
 from sqlalchemy import Column, BigInteger, Integer, String, Text, DateTime, Boolean, Index
 from sqlalchemy.dialects.postgresql import JSONB
-from datetime import datetime, timezone
+from datetime import datetime
 
 from app.models.database import Base
+from config import now_shanghai
 
 
 class ReferralResult(Base):
@@ -21,7 +22,7 @@ class ReferralResult(Base):
     status = Column(String(16), default="success", comment="success / failed")
     result = Column(JSONB, nullable=False, comment="分析结果")
     error_msg = Column(Text, nullable=True, comment="失败原因")
-    created_at = Column(DateTime, default=lambda: datetime.now(), comment="创建时间")
+    created_at = Column(DateTime, default=lambda: now_shanghai(), comment="创建时间")
 
     def to_dict(self) -> dict:
         return {
@@ -62,7 +63,7 @@ class SalesJourneyResult(Base):
 
     status = Column(String(16), default="success", comment="success / failed / no_chat")
     error_msg = Column(Text, nullable=True, comment="失败原因")
-    created_at = Column(DateTime, default=lambda: datetime.now(), comment="创建时间")
+    created_at = Column(DateTime, default=lambda: now_shanghai(), comment="创建时间")
 
     def to_dict(self) -> dict:
         return {
@@ -126,7 +127,7 @@ class CaseExtractionResult(Base):
 
     status = Column(String(16), default="success", comment="success / failed / no_cases")
     error_msg = Column(Text, nullable=True, comment="失败原因")
-    created_at = Column(DateTime, default=lambda: datetime.now(), comment="创建时间")
+    created_at = Column(DateTime, default=lambda: now_shanghai(), comment="创建时间")
 
     def to_dict(self) -> dict:
         return {
@@ -182,7 +183,7 @@ class FollowUpComplianceResult(Base):
     raw_response = Column(Text, nullable=True, comment="AI原始响应（备用）")
     status = Column(String(16), default="success", comment="success / failed / no_chat")
     error_msg = Column(Text, nullable=True, comment="失败原因")
-    created_at = Column(DateTime, default=lambda: datetime.now(), comment="创建时间")
+    created_at = Column(DateTime, default=lambda: now_shanghai(), comment="创建时间")
 
     def to_dict(self) -> dict:
         return {
@@ -214,8 +215,8 @@ class RiskKeyword(Base):
     category = Column(String(32), nullable=False, comment="类别：refund/complaint/order_cancel/regulatory/fraud")
     severity = Column(String(16), default="medium", comment="严重程度：high/medium/low")
     is_active = Column(Boolean, default=True, comment="是否启用")
-    created_at = Column(DateTime, default=lambda: datetime.now(), comment="创建时间")
-    updated_at = Column(DateTime, onupdate=lambda: datetime.now(), comment="更新时间")
+    created_at = Column(DateTime, default=lambda: now_shanghai(), comment="创建时间")
+    updated_at = Column(DateTime, onupdate=lambda: now_shanghai(), comment="更新时间")
 
     def to_dict(self) -> dict:
         return {
@@ -279,7 +280,7 @@ class QualityCheckResult(Base):
     modified_by = Column(String(64), nullable=True, comment="最后修改人ID")
     modified_by_name = Column(String(64), nullable=True, comment="最后修改人姓名")
 
-    created_at = Column(DateTime, default=lambda: datetime.now(), comment="创建时间")
+    created_at = Column(DateTime, default=lambda: now_shanghai(), comment="创建时间")
 
     def to_dict(self) -> dict:
         return {
@@ -338,8 +339,8 @@ class RefundWhitelistPattern(Base):
     pattern = Column(String(100), nullable=False, unique=True, comment="话术内容")
     description = Column(String(200), nullable=True, comment="描述说明")
     is_active = Column(Boolean, default=True, comment="是否启用")
-    created_at = Column(DateTime, default=lambda: datetime.now(), comment="创建时间")
-    updated_at = Column(DateTime, onupdate=lambda: datetime.now(), comment="更新时间")
+    created_at = Column(DateTime, default=lambda: now_shanghai(), comment="创建时间")
+    updated_at = Column(DateTime, onupdate=lambda: now_shanghai(), comment="更新时间")
 
     def to_dict(self) -> dict:
         return {
@@ -367,7 +368,7 @@ class QualityCheckModificationLog(Base):
     old_remark = Column(Text, nullable=True, comment="原备注")
     new_remark = Column(Text, nullable=True, comment="新备注")
 
-    modified_at = Column(DateTime, default=lambda: datetime.now(), comment="修改时间")
+    modified_at = Column(DateTime, default=lambda: now_shanghai(), comment="修改时间")
 
     def to_dict(self) -> dict:
         return {
