@@ -333,9 +333,39 @@ COMMENT ON COLUMN follow_up_compliance_results.total_follow_up_days IS '总跟�
 COMMENT ON COLUMN follow_up_compliance_results.window_size_days IS '滑动窗口大小（天）';
 COMMENT ON COLUMN follow_up_compliance_results.min_required_count IS '窗口内最低跟进次数要求';
 """,
+    "quality_check_tasks": """
+CREATE TABLE quality_check_tasks (
+    id SERIAL PRIMARY KEY,
+    batch_task_id VARCHAR(64) UNIQUE NOT NULL,
+    status VARCHAR(16) DEFAULT 'pending',
+    start_time VARCHAR(32),
+    end_time VARCHAR(32),
+    user_id_filter VARCHAR(64),
+    total_pairs INTEGER DEFAULT 0,
+    completed_pairs INTEGER DEFAULT 0,
+    risk_detected INTEGER DEFAULT 0,
+    no_chat_count INTEGER DEFAULT 0,
+    failed_count INTEGER DEFAULT 0,
+    cancelled_count INTEGER DEFAULT 0,
+    filtered_count INTEGER DEFAULT 0,
+    error_message TEXT,
+    triggered_by VARCHAR(64),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS ix_quality_check_task_batch_id ON quality_check_tasks(batch_task_id);
+CREATE INDEX IF NOT EXISTS ix_quality_check_task_status ON quality_check_tasks(status);
+CREATE INDEX IF NOT EXISTS ix_quality_check_task_created ON quality_check_tasks(created_at);
+""",
+    "quality_check_tasks_comments": """
+COMMENT ON TABLE quality_check_tasks IS '质检批量任务表';
+COMMENT ON COLUMN quality_check_tasks.batch_task_id IS '批次号（UUID）';
+COMMENT ON COLUMN quality_check_tasks.status IS '任务状态';
+""",
     "quality_check_results": """
 CREATE TABLE quality_check_results (
     id SERIAL PRIMARY KEY,
+    task_id INTEGER REFERENCES quality_check_tasks(id) ON DELETE SET NULL,
     user_id VARCHAR(64) NOT NULL,
     user_name VARCHAR(64),
     user_wx_id VARCHAR(64),
@@ -347,37 +377,69 @@ CREATE TABLE quality_check_results (
     alias VARCHAR(128),
     phone VARCHAR(32),
     remark_phone VARCHAR(32),
-    check_time_start VARCHAR(32),
-    check_time_end VARCHAR(32),
     chat_record_count INTEGER,
     keyword_detected VARCHAR(16) DEFAULT 'no',
     detected_keywords VARCHAR(512),
-    keyword_matches JSONB,
     risk_level VARCHAR(16),
     risk_category VARCHAR(64),
-    risk_description TEXT,
-    suggested_action TEXT,
-    key_evidence JSONB,
-    raw_response TEXT,
+    trigger_party VARCHAR(16),
+    issue_summary VARCHAR(256),
+    action_priority VARCHAR(8),
+    recommended_owner VARCHAR(32),
+    action_type VARCHAR(32),
+    follow_up_deadline VARCHAR(32),
+    needs_manual_review BOOLEAN DEFAULT false,
+    confidence FLOAT,
+    process_status VARCHAR(32) DEFAULT 'pending',
     status VARCHAR(16) DEFAULT 'success',
     error_msg TEXT,
-    batch_task_id VARCHAR(64),
+    remark TEXT,
+    modified_risk_level VARCHAR(16),
+    modified_at TIMESTAMP,
+    modified_by VARCHAR(64),
+    modified_by_name VARCHAR(64),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS ix_quality_check_user_id ON quality_check_results(user_id);
 CREATE INDEX IF NOT EXISTS ix_quality_check_risk_level ON quality_check_results(risk_level);
 CREATE INDEX IF NOT EXISTS ix_quality_check_created_at ON quality_check_results(created_at);
 CREATE INDEX IF NOT EXISTS ix_quality_check_user_created ON quality_check_results(user_id, created_at);
+CREATE INDEX IF NOT EXISTS ix_quality_check_trigger_party ON quality_check_results(trigger_party);
+CREATE INDEX IF NOT EXISTS ix_quality_check_task_id ON quality_check_results(task_id);
+CREATE INDEX IF NOT EXISTS ix_quality_check_action_priority ON quality_check_results(action_priority);
+CREATE INDEX IF NOT EXISTS ix_quality_check_process_status ON quality_check_results(process_status);
 """,
     "quality_check_results_comments": """
 COMMENT ON TABLE quality_check_results IS '质检检测结果表';
 COMMENT ON COLUMN quality_check_results.keyword_detected IS 'yes/no 是否检测到关键词';
-COMMENT ON COLUMN quality_check_results.risk_level IS '风险等级：high/medium/low/none';
-COMMENT ON COLUMN quality_check_results.risk_category IS '风险类别：投诉/退款/退费/取消订单等';
+COMMENT ON COLUMN quality_check_results.risk_level IS '风险等级：high/medium/low/none/unknown';
+COMMENT ON COLUMN quality_check_results.risk_category IS '风险类别：投诉/退款/取消订单/监管介入等';
+COMMENT ON COLUMN quality_check_results.issue_summary IS '一句话问题摘要';
+COMMENT ON COLUMN quality_check_results.action_priority IS '处理优先级：P0/P1/P2/P3';
+COMMENT ON COLUMN quality_check_results.process_status IS '处理状态';
 COMMENT ON COLUMN quality_check_results.chat_title IS '好友备注';
 COMMENT ON COLUMN quality_check_results.alias IS '好友别名';
 COMMENT ON COLUMN quality_check_results.phone IS '绑定手机号';
 COMMENT ON COLUMN quality_check_results.remark_phone IS '备注手机号';
+""",
+    "quality_check_details": """
+CREATE TABLE quality_check_details (
+    id SERIAL PRIMARY KEY,
+    result_id INTEGER NOT NULL UNIQUE REFERENCES quality_check_results(id) ON DELETE CASCADE,
+    guidance JSONB,
+    keyword_matches JSONB,
+    key_evidence JSONB,
+    raw_response TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS ix_quality_check_detail_result_id ON quality_check_details(result_id);
+""",
+    "quality_check_details_comments": """
+COMMENT ON TABLE quality_check_details IS '质检检测详情表';
+COMMENT ON COLUMN quality_check_details.guidance IS 'AI完整处理建议';
+COMMENT ON COLUMN quality_check_details.keyword_matches IS '关键词匹配详情';
+COMMENT ON COLUMN quality_check_details.key_evidence IS '关键证据';
+COMMENT ON COLUMN quality_check_details.raw_response IS 'AI原始响应';
 """,
     "case_script_library": """
 CREATE TABLE case_script_library (
@@ -498,8 +560,8 @@ def insert_copied_data(engine, table_name: str, data: list):
                 elif isinstance(value, (dict, list)):
                     params[key] = json.dumps(value)
                 elif isinstance(value, str) and key in ('permissions', 'result', 'analysis_result',
-                                                          'summary', 'violation_windows', 'keyword_matches',
-                                                          'key_evidence'):
+                                                          'summary', 'violation_windows', 'guidance',
+                                                          'keyword_matches', 'key_evidence'):
                     try:
                         json.loads(value)
                         params[key] = value
@@ -637,8 +699,12 @@ def run_create(new_db_name: str, init_data: bool = False, copy_from_source: bool
         ("case_extraction_results_comments", True),
         ("follow_up_compliance_results", False),
         ("follow_up_compliance_results_comments", True),
+        ("quality_check_tasks", False),
+        ("quality_check_tasks_comments", True),
         ("quality_check_results", False),
         ("quality_check_results_comments", True),
+        ("quality_check_details", False),
+        ("quality_check_details_comments", True),
         ("case_script_library", False),
         ("case_script_library_comments", True),
         ("case_script_library_index", True),
@@ -730,7 +796,8 @@ def run_create(new_db_name: str, init_data: bool = False, copy_from_source: bool
             with new_engine.connect() as conn:
                 tables = ["users", "roles", "user_roles", "risk_keywords",
                           "referral_results", "case_extraction_results", "sales_journey_results",
-                          "follow_up_compliance_results", "quality_check_results", "case_script_library"]
+                          "follow_up_compliance_results", "quality_check_tasks", "quality_check_results",
+                          "quality_check_details", "case_script_library"]
                 for table_name in tables:
                     count = conn.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar()
                     print(f"  {table_name}: {count} 条记录")

@@ -57,11 +57,6 @@
             <a-select-option value="both">双方</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item class="qr-filter-buttons">
-          <a-button type="primary" @click="handleSearch">查询</a-button>
-          <a-button @click="handleReset">重置</a-button>
-          <a-button @click="handleExport">导出 CSV</a-button>
-        </a-form-item>
       </div>
       <div class="qr-filter-row">
         <a-form-item label="风险等级">
@@ -98,6 +93,56 @@
             </a-select-opt-group>
           </a-select>
         </a-form-item>
+        <a-form-item label="优先级">
+          <a-select v-model:value="filters.action_priority" placeholder="全部" style="width: 110px" allowClear>
+            <a-select-option value="P0">P0 立即</a-select-option>
+            <a-select-option value="P1">P1 今日</a-select-option>
+            <a-select-option value="P2">P2 复核</a-select-option>
+            <a-select-option value="P3">P3 观察</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="责任方">
+          <a-select v-model:value="filters.recommended_owner" placeholder="全部" style="width: 120px" allowClear>
+            <a-select-option value="质检">质检</a-select-option>
+            <a-select-option value="销售主管">销售主管</a-select-option>
+            <a-select-option value="客服">客服</a-select-option>
+            <a-select-option value="法务">法务</a-select-option>
+            <a-select-option value="无需处理">无需处理</a-select-option>
+          </a-select>
+        </a-form-item>
+      </div>
+      <div class="qr-filter-row">
+        <a-form-item label="动作类型">
+          <a-select v-model:value="filters.action_type" placeholder="全部" style="width: 130px" allowClear>
+            <a-select-option value="立即介入">立即介入</a-select-option>
+            <a-select-option value="主管复核">主管复核</a-select-option>
+            <a-select-option value="客服跟进">客服跟进</a-select-option>
+            <a-select-option value="销售安抚">销售安抚</a-select-option>
+            <a-select-option value="培训复盘">培训复盘</a-select-option>
+            <a-select-option value="误报观察">误报观察</a-select-option>
+            <a-select-option value="无需处理">无需处理</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="人工复核">
+          <a-select v-model:value="filters.needs_manual_review" placeholder="全部" style="width: 110px" allowClear>
+            <a-select-option :value="true">需要</a-select-option>
+            <a-select-option :value="false">不需要</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="处理状态">
+          <a-select v-model:value="filters.process_status" placeholder="全部" style="width: 130px" allowClear>
+            <a-select-option value="pending">待处理</a-select-option>
+            <a-select-option value="processing">处理中</a-select-option>
+            <a-select-option value="resolved">已处理</a-select-option>
+            <a-select-option value="false_positive">误报</a-select-option>
+            <a-select-option value="escalated">已升级</a-select-option>
+          </a-select>
+        </a-form-item>
+      </div>
+      <div class="qr-filter-actions-row">
+        <a-button type="primary" @click="handleSearch">查询</a-button>
+        <a-button @click="handleReset">重置</a-button>
+        <a-button @click="handleExport">导出 CSV</a-button>
       </div>
     </a-form>
 
@@ -144,8 +189,32 @@
         <template v-if="column.key === 'detected_keywords'">
           <span :title="record.detected_keywords">{{ record.detected_keywords || '无' }}</span>
         </template>
-        <template v-if="column.key === 'risk_description'">
-          <span class="table-risk-desc" :title="record.risk_description">{{ record.risk_description || '-' }}</span>
+        <template v-if="column.key === 'issue_summary'">
+          <a-tooltip v-if="record.issue_summary" placement="topLeft" :overlayStyle="{ maxWidth: '520px' }">
+            <template #title>
+              <span class="summary-tooltip-text">{{ record.issue_summary }}</span>
+            </template>
+            <span class="table-risk-desc clickable-summary">{{ record.issue_summary }}</span>
+          </a-tooltip>
+          <span v-else>-</span>
+        </template>
+        <template v-if="column.key === 'action_priority'">
+          <a-tag :color="getPriorityColor(record.action_priority)">
+            {{ getPriorityText(record.action_priority) }}
+          </a-tag>
+        </template>
+        <template v-if="column.key === 'recommended_owner'">
+          <a-tag :color="getOwnerColor(record.recommended_owner)">
+            {{ record.recommended_owner || '-' }}
+          </a-tag>
+        </template>
+        <template v-if="column.key === 'action_type'">
+          <span>{{ record.action_type || '-' }}</span>
+        </template>
+        <template v-if="column.key === 'process_status'">
+          <a-tag :color="getProcessStatusColor(record.process_status)">
+            {{ getProcessStatusText(record.process_status) }}
+          </a-tag>
         </template>
         <template v-if="column.key === 'remark'">
           <span :title="record.remark">{{ record.remark || '-' }}</span>
@@ -162,6 +231,54 @@
       <div v-if="detailData">
         <!-- 非编辑模式 -->
         <div v-if="!editMode">
+          <div class="guidance-panel">
+            <div class="guidance-head">
+              <div>
+                <div class="guidance-title">{{ detailData.issue_summary || '暂无问题摘要' }}</div>
+                <div class="guidance-subtitle">
+                  {{ detailData.risk_category || '其他' }} · {{ getTriggerPartyText(detailData.trigger_party) }}触发
+                </div>
+              </div>
+              <div class="guidance-tags">
+                <a-tag :color="getPriorityColor(detailData.action_priority)">{{ getPriorityText(detailData.action_priority) }}</a-tag>
+                <a-tag :color="getOwnerColor(detailData.recommended_owner)">{{ detailData.recommended_owner || '未分配' }}</a-tag>
+                <a-tag :color="getProcessStatusColor(detailData.process_status)">{{ getProcessStatusText(detailData.process_status) }}</a-tag>
+              </div>
+            </div>
+            <div class="guidance-grid">
+              <div class="guidance-item">
+                <span class="guidance-label">风险原因</span>
+                <p>{{ detailData.guidance?.risk_reason || '-' }}</p>
+              </div>
+              <div class="guidance-item">
+                <span class="guidance-label">客户诉求</span>
+                <p>{{ detailData.guidance?.customer_intent || '-' }}</p>
+              </div>
+              <div class="guidance-item">
+                <span class="guidance-label">立即动作</span>
+                <p>{{ detailData.guidance?.immediate_action || detailData.action_type || '-' }}</p>
+              </div>
+              <div class="guidance-item">
+                <span class="guidance-label">处理时限</span>
+                <p>{{ detailData.follow_up_deadline || '-' }}</p>
+              </div>
+              <div class="guidance-item full">
+                <div class="guidance-copy-row">
+                  <span class="guidance-label">建议话术</span>
+                  <a-button size="small" type="link" @click="copyReplySuggestion">复制</a-button>
+                </div>
+                <p>{{ detailData.guidance?.reply_suggestion || '-' }}</p>
+              </div>
+              <div class="guidance-item">
+                <span class="guidance-label">培训建议</span>
+                <p>{{ detailData.guidance?.training_suggestion || '-' }}</p>
+              </div>
+              <div class="guidance-item">
+                <span class="guidance-label">升级原因</span>
+                <p>{{ detailData.guidance?.escalation_reason || '-' }}</p>
+              </div>
+            </div>
+          </div>
           <a-descriptions :column="1" bordered size="small" :label-style="{ width: '120px', minWidth: '120px' }">
             <a-descriptions-item label="销售ID">{{ detailData.user_id }}</a-descriptions-item>
             <a-descriptions-item label="销售姓名">{{ detailData.user_name || '-' }}</a-descriptions-item>
@@ -201,23 +318,25 @@
               </a-tag>
             </a-descriptions-item>
             <a-descriptions-item v-if="detailData.risk_category" label="风险类别">{{ detailData.risk_category }}</a-descriptions-item>
-            <a-descriptions-item label="风险描述">
-              <a-tooltip v-if="detailData.risk_description && detailData.risk_description.length > 100" placement="topLeft" :overlayStyle="{ maxWidth: '500px' }">
-                <template #title>
-                  <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.risk_description }}</pre>
-                </template>
-                <pre class="risk-desc-preview">{{ detailData.risk_description }}</pre>
-              </a-tooltip>
-              <pre v-else style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.risk_description || '-' }}</pre>
+            <a-descriptions-item label="问题摘要">
+              <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.issue_summary || '-' }}</pre>
             </a-descriptions-item>
-            <a-descriptions-item label="建议措施">
-              <a-tooltip v-if="detailData.suggested_action && detailData.suggested_action.length > 100" placement="topLeft" :overlayStyle="{ maxWidth: '500px' }">
-                <template #title>
-                  <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.suggested_action }}</pre>
-                </template>
-                <pre class="risk-desc-preview">{{ detailData.suggested_action }}</pre>
-              </a-tooltip>
-              <pre v-else style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.suggested_action || '-' }}</pre>
+            <a-descriptions-item label="处理建议">
+              <div class="processing-line">
+                <a-tag :color="getPriorityColor(detailData.action_priority)">{{ getPriorityText(detailData.action_priority) }}</a-tag>
+                <span>{{ detailData.recommended_owner || '-' }}</span>
+                <span>{{ detailData.action_type || '-' }}</span>
+                <span>{{ detailData.follow_up_deadline || '-' }}</span>
+                <a-tag v-if="detailData.needs_manual_review" color="red">需人工复核</a-tag>
+                <a-tag v-else color="green">无需人工复核</a-tag>
+              </div>
+            </a-descriptions-item>
+            <a-descriptions-item v-if="detailData.key_evidence && detailData.key_evidence.length" label="关键证据">
+              <div v-for="(e, idx) in detailData.key_evidence" :key="idx" class="evidence-item">
+                <div class="evidence-meta">{{ e.speaker || '-' }} · {{ e.time || '-' }}</div>
+                <div class="evidence-content">{{ e.content || '-' }}</div>
+                <div v-if="e.reason" class="evidence-reason">{{ e.reason }}</div>
+              </div>
             </a-descriptions-item>
             <a-descriptions-item label="备注">
               <pre style="white-space: pre-wrap; margin: 0; word-break: break-word">{{ detailData.remark || '-' }}</pre>
@@ -239,10 +358,20 @@
                 <a-select-option value="medium">中风险</a-select-option>
                 <a-select-option value="low">低风险</a-select-option>
                 <a-select-option value="none">无风险</a-select-option>
+                <a-select-option value="unknown">未知</a-select-option>
               </a-select>
               <span v-if="editForm.risk_level !== detailData.risk_level" style="margin-left: 8px; color: #999; font-size: 12px">
                 (原始: {{ getRiskText(detailData.risk_level) }})
               </span>
+            </a-descriptions-item>
+            <a-descriptions-item label="处理状态">
+              <a-select v-model:value="editForm.process_status" style="width: 160px">
+                <a-select-option value="pending">待处理</a-select-option>
+                <a-select-option value="processing">处理中</a-select-option>
+                <a-select-option value="resolved">已处理</a-select-option>
+                <a-select-option value="false_positive">误报</a-select-option>
+                <a-select-option value="escalated">已升级</a-select-option>
+              </a-select>
             </a-descriptions-item>
             <a-descriptions-item label="备注">
               <a-textarea v-model:value="editForm.remark" :rows="3" placeholder="请输入备注" />
@@ -378,6 +507,11 @@ const filters = reactive({
   risk_levels: [],   // 风险等级数组
   keywords: [],      // 关键词数组
   trigger_party: undefined,
+  action_priority: undefined,
+  recommended_owner: undefined,
+  action_type: undefined,
+  needs_manual_review: undefined,
+  process_status: undefined,
   timeRange: null
 })
 
@@ -407,8 +541,12 @@ const columns = [
   { title: '备注手机号', dataIndex: 'remark_phone', key: 'remark_phone', minWidth: 130, ellipsis: true },
   { title: '风险等级', key: 'risk_level', minWidth: 100 },
   { title: '触发方', dataIndex: 'trigger_party', key: 'trigger_party', width: 100 },
+  { title: '问题摘要', key: 'issue_summary', width: 220 },
+  { title: '优先级', key: 'action_priority', minWidth: 90 },
+  { title: '责任方', key: 'recommended_owner', minWidth: 100 },
+  { title: '动作类型', key: 'action_type', minWidth: 110, ellipsis: true },
+  { title: '处理状态', key: 'process_status', minWidth: 100 },
   { title: '检测关键词', key: 'detected_keywords', minWidth: 150, ellipsis: true },
-  { title: '风险描述', key: 'risk_description', width: 200 }, // 无宽度，自适应
   { title: '风险类别', dataIndex: 'risk_category', key: 'risk_category', minWidth: 100 },
   { title: '备注', dataIndex: 'remark', key: 'remark', width: 150, ellipsis: true },
   { title: '操作', key: 'actions', width: 110, fixed: 'right' },
@@ -423,6 +561,7 @@ const editMode = ref(false)
 const editFromDetail = ref(false)  // 标记编辑入口是否来自详情弹窗
 const editForm = reactive({
   risk_level: '',
+  process_status: 'pending',
   remark: ''
 })
 const editLoading = ref(false)
@@ -441,12 +580,12 @@ const modificationLogsData = ref([])
 
 // 风险等级映射
 function getRiskColor(level) {
-  const map = { high: 'error', medium: 'warning', low: 'blue', none: 'success' }
+  const map = { high: 'error', medium: 'warning', low: 'blue', none: 'success', unknown: 'default' }
   return map[level] || 'default'
 }
 
 function getRiskText(level) {
-  const map = { high: '高风险', medium: '中风险', low: '低风险', none: '无风险' }
+  const map = { high: '高风险', medium: '中风险', low: '低风险', none: '无风险', unknown: '未知' }
   return map[level] || '未知'
 }
 
@@ -486,6 +625,59 @@ const getTriggerPartyText = (trigger_party) => {
   return textMap[trigger_party] || '无'
 }
 
+const getPriorityColor = (priority) => {
+  const colorMap = {
+    P0: 'red',
+    P1: 'orange',
+    P2: 'blue',
+    P3: 'green'
+  }
+  return colorMap[priority] || 'default'
+}
+
+const getPriorityText = (priority) => {
+  const textMap = {
+    P0: 'P0 立即',
+    P1: 'P1 今日',
+    P2: 'P2 复核',
+    P3: 'P3 观察'
+  }
+  return textMap[priority] || '未定'
+}
+
+const getOwnerColor = (owner) => {
+  const colorMap = {
+    '质检': 'geekblue',
+    '销售主管': 'purple',
+    '客服': 'cyan',
+    '法务': 'red',
+    '无需处理': 'green'
+  }
+  return colorMap[owner] || 'default'
+}
+
+const getProcessStatusColor = (status) => {
+  const colorMap = {
+    pending: 'gold',
+    processing: 'blue',
+    resolved: 'green',
+    false_positive: 'default',
+    escalated: 'red'
+  }
+  return colorMap[status] || 'default'
+}
+
+const getProcessStatusText = (status) => {
+  const textMap = {
+    pending: '待处理',
+    processing: '处理中',
+    resolved: '已处理',
+    false_positive: '误报',
+    escalated: '已升级'
+  }
+  return textMap[status] || '未定'
+}
+
 // 加载统计（响应筛选条件，但不包括风险等级）
 async function loadStats() {
   try {
@@ -494,6 +686,11 @@ async function loadStats() {
     if (filters.friend_id) params.friend_id = filters.friend_id
     if (filters.keyword) params.keyword = filters.keyword
     if (filters.trigger_party) params.trigger_party = filters.trigger_party
+    if (filters.action_priority) params.action_priority = filters.action_priority
+    if (filters.recommended_owner) params.recommended_owner = filters.recommended_owner
+    if (filters.action_type) params.action_type = filters.action_type
+    if (filters.needs_manual_review !== undefined) params.needs_manual_review = filters.needs_manual_review
+    if (filters.process_status) params.process_status = filters.process_status
     if (filters.timeRange && filters.timeRange.length === 2) {
       params.start_time = filters.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
       params.end_time = filters.timeRange[1].format('YYYY-MM-DD HH:mm:ss')
@@ -637,10 +834,29 @@ function handleReset() {
   filters.risk_levels = []
   filters.keywords = []
   filters.trigger_party = undefined
+  filters.action_priority = undefined
+  filters.recommended_owner = undefined
+  filters.action_type = undefined
+  filters.needs_manual_review = undefined
+  filters.process_status = undefined
   filters.timeRange = null
   pagination.current = 1
   loadData()
   loadStats()
+}
+
+async function copyReplySuggestion() {
+  const text = detailData.value?.guidance?.reply_suggestion || ''
+  if (!text) {
+    message.warning('暂无可复制话术')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(text)
+    message.success('话术已复制')
+  } catch {
+    message.error('复制失败')
+  }
 }
 
 // 分页
@@ -670,6 +886,7 @@ async function showDetail(record) {
 function showEdit(record) {
   detailData.value = record
   editForm.risk_level = record.modified_risk_level || record.risk_level
+  editForm.process_status = record.process_status || 'pending'
   editForm.remark = record.remark || ''
   editFromDetail.value = false  // 标记来源为表格
   editMode.value = true
@@ -679,6 +896,7 @@ function showEdit(record) {
 // 从详情弹窗进入编辑模式
 function enterEditMode() {
   editForm.risk_level = detailData.value.modified_risk_level || detailData.value.risk_level
+  editForm.process_status = detailData.value.process_status || 'pending'
   editForm.remark = detailData.value.remark || ''
   editFromDetail.value = true  // 标记来源为详情弹窗
   editMode.value = true
@@ -699,6 +917,7 @@ async function saveEdit() {
   try {
     const res = await updateQualityCheckResult(detailData.value.id, {
       risk_level: editForm.risk_level,
+      process_status: editForm.process_status,
       remark: editForm.remark
     })
     if (res.error) {
@@ -814,6 +1033,11 @@ async function handleExport() {
 //     if (filters.risk_level) params.risk_level = filters.risk_level
 //     if (filters.keyword) params.keyword = filters.keyword
     if (filters.trigger_party) params.trigger_party = filters.trigger_party
+    if (filters.action_priority) params.action_priority = filters.action_priority
+    if (filters.recommended_owner) params.recommended_owner = filters.recommended_owner
+    if (filters.action_type) params.action_type = filters.action_type
+    if (filters.needs_manual_review !== undefined) params.needs_manual_review = filters.needs_manual_review
+    if (filters.process_status) params.process_status = filters.process_status
     if (filters.timeRange && filters.timeRange.length === 2) {
       params.start_time = filters.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
       params.end_time = filters.timeRange[1].format('YYYY-MM-DD HH:mm:ss')
@@ -921,7 +1145,7 @@ onMounted(() => {
 /* 筛选栏 */
 .qr-filter-bar {
   margin-bottom: 5px;
-  padding: 12px 20px;
+  padding: 12px 20px 14px;
   background: #fff;
   border-radius: 8px;
   border: 1px solid #e2e8f0;
@@ -932,6 +1156,7 @@ onMounted(() => {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  width: 100%;
 }
 
 .qr-filter-row .ant-form-item {
@@ -939,12 +1164,156 @@ onMounted(() => {
   margin-right: 0;
 }
 
-.qr-filter-buttons {
-  margin-left: auto;
+.qr-filter-actions-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid #f1f5f9;
 }
 
-.qr-filter-buttons .ant-btn {
-  margin-left: 8px;
+.guidance-panel {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.guidance-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.guidance-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #102a43;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.guidance-subtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #627d98;
+}
+
+.guidance-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 180px;
+}
+
+.guidance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.guidance-item {
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.guidance-item.full {
+  grid-column: 1 / -1;
+}
+
+.guidance-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #486581;
+}
+
+.guidance-item p {
+  margin: 0;
+  color: #243b53;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.guidance-copy-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.processing-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.evidence-item {
+  padding: 10px;
+  margin-bottom: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.evidence-meta {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: #627d98;
+}
+
+.evidence-content {
+  color: #243b53;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.evidence-reason {
+  margin-top: 6px;
+  padding-left: 8px;
+  border-left: 2px solid #3b82f6;
+  color: #486581;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.clickable-summary {
+  cursor: help;
+  border-bottom: 1px dotted #94a3b8;
+}
+
+.summary-tooltip-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 720px) {
+  .guidance-head {
+    display: block;
+  }
+
+  .guidance-tags {
+    justify-content: flex-start;
+    margin-top: 8px;
+  }
+
+  .guidance-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .qr-filter-actions-row {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
 }
 
 /* 聊天记录弹窗样式 - 微信风格 */

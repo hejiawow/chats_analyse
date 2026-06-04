@@ -89,6 +89,44 @@ def _get_friend_info(user_id: str, friend_id: int) -> dict:
     }
 
 
+def _quality_result_kwargs(result: dict) -> dict:
+    """提取质检主表轻量字段。"""
+    return {
+        "keyword_detected": result.get("keyword_detected", "no"),
+        "detected_keywords": result.get("detected_keywords"),
+        "risk_level": result.get("risk_level"),
+        "risk_category": result.get("risk_category"),
+        "trigger_party": result.get("trigger_party"),
+        "issue_summary": result.get("issue_summary"),
+        "action_priority": result.get("action_priority"),
+        "recommended_owner": result.get("recommended_owner"),
+        "action_type": result.get("action_type"),
+        "follow_up_deadline": result.get("follow_up_deadline"),
+        "needs_manual_review": result.get("needs_manual_review"),
+        "confidence": result.get("confidence"),
+        "process_status": result.get("process_status", "pending"),
+        "status": result.get("status", "success"),
+    }
+
+
+def _has_quality_detail_payload(result: dict) -> bool:
+    return any(
+        result.get(key)
+        for key in ("guidance", "keyword_matches", "key_evidence", "raw_response")
+    )
+
+
+def _quality_detail_from_result(result_id: int, result: dict) -> QualityCheckDetail:
+    return QualityCheckDetail(
+        result_id=result_id,
+        guidance=result.get("guidance"),
+        keyword_matches=result.get("keyword_matches"),
+        key_evidence=result.get("key_evidence"),
+        raw_response=result.get("raw_response"),
+        created_at=now_shanghai(),
+    )
+
+
 def update_batch_progress(batch_task_id: str, completed: int, total: int, status: str = "running", **extra):
     """更新批量任务进度"""
     data = {"completed": completed, "total": total, "status": status}
@@ -268,30 +306,16 @@ def run_single_batch_check(self, batch_task_id: str, db_task_id: int, user_id: s
                     phone=friend_info.get("phone"),
                     remark_phone=friend_info.get("remark_phone"),
                     chat_record_count=result.get("chat_record_count", len(chat_records)),
-                    keyword_detected=result.get("keyword_detected", "no"),
-                    detected_keywords=result.get("detected_keywords"),
-                    risk_level=result.get("risk_level"),
-                    risk_category=result.get("risk_category"),
-                    trigger_party=result.get("trigger_party"),
-                    risk_description=result.get("risk_description"),
-                    status=result.get("status", "success"),
                     task_id=db_task_id,
                     created_at=now_shanghai(),
+                    **_quality_result_kwargs(result),
                 )
                 session.add(record)
                 session.flush()  # 获取 record.id
 
                 # 保存详情表记录（大字段）
-                if result.get("keyword_matches") or result.get("key_evidence") or result.get("suggested_action") or result.get("raw_response"):
-                    detail = QualityCheckDetail(
-                        result_id=record.id,
-                        keyword_matches=result.get("keyword_matches"),
-                        key_evidence=result.get("key_evidence"),
-                        suggested_action=result.get("suggested_action"),
-                        raw_response=result.get("raw_response"),
-                        created_at=now_shanghai(),
-                    )
-                    session.add(detail)
+                if _has_quality_detail_payload(result):
+                    session.add(_quality_detail_from_result(record.id, result))
 
                 session.commit()
 
@@ -497,30 +521,16 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, db_task_id: int,
                     phone=friend_info.get("phone"),
                     remark_phone=friend_info.get("remark_phone"),
                     chat_record_count=result.get("chat_record_count", len(chat_records)),
-                    keyword_detected=result.get("keyword_detected", "no"),
-                    detected_keywords=result.get("detected_keywords"),
-                    risk_level=result.get("risk_level"),
-                    risk_category=result.get("risk_category"),
-                    trigger_party=result.get("trigger_party"),
-                    risk_description=result.get("risk_description"),
-                    status=result.get("status", "success"),
                     task_id=db_task_id,
                     created_at=now_shanghai(),
+                    **_quality_result_kwargs(result),
                 )
                 session.add(record)
                 session.flush()  # 获取 record.id
 
                 # 保存详情表记录（大字段）
-                if result.get("keyword_matches") or result.get("key_evidence") or result.get("suggested_action") or result.get("raw_response"):
-                    detail = QualityCheckDetail(
-                        result_id=record.id,
-                        keyword_matches=result.get("keyword_matches"),
-                        key_evidence=result.get("key_evidence"),
-                        suggested_action=result.get("suggested_action"),
-                        raw_response=result.get("raw_response"),
-                        created_at=now_shanghai(),
-                    )
-                    session.add(detail)
+                if _has_quality_detail_payload(result):
+                    session.add(_quality_detail_from_result(record.id, result))
 
                 session.commit()
         else:
@@ -684,15 +694,15 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
 
     _log(batch_task_id, f"[匹配] 发现 {len(matched_pairs)} 个匹配关键词的销售-好友对", "info")
 
-    # 4. 协议退费过滤（新增步骤）
-    _log(batch_task_id, "[过滤] 正在检查协议退费触发模式...", "info")
+    # 4. 质检过滤规则（无客户消息 / 阿虎好友名 / 协议退费）
+    _log(batch_task_id, "[过滤] 正在执行质检过滤规则...", "info")
     from app.services.refund_filter import filter_matched_pairs
 
     filtered_pairs = filter_matched_pairs(matched_pairs, start_time, end_time, batch_task_id, _log, all_messages=all_messages)
 
     filtered_count = len(matched_pairs) - len(filtered_pairs)
     if filtered_count > 0:
-        _log(batch_task_id, f"[过滤] 过滤掉 {filtered_count} 个协议退费触发的聊天对", "info")
+        _log(batch_task_id, f"[过滤] 过滤掉 {filtered_count} 个命中过滤规则的聊天对", "info")
 
     matched_pairs = filtered_pairs
 
@@ -735,5 +745,5 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
         "status": "started",
         "total_pairs": len(matched_pairs),
         "filtered_count": filtered_count,
-        "message": f"发现 {len(matched_pairs)} 个匹配关键词的销售-好友对（过滤掉 {filtered_count} 个协议退费）",
+        "message": f"发现 {len(matched_pairs)} 个匹配关键词的销售-好友对（过滤掉 {filtered_count} 个命中过滤规则的聊天对）",
     }

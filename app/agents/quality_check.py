@@ -16,6 +16,140 @@ from app.models.result import RiskKeyword
 from sqlalchemy.orm import Session
 
 
+ALLOWED_RISK_LEVELS = {"high", "medium", "low", "none", "unknown"}
+ALLOWED_RISK_CATEGORIES = {"投诉", "退款", "取消订单", "监管介入", "虚假宣传", "服务不满", "其他"}
+ALLOWED_TRIGGER_PARTIES = {"sales", "customer", "both", "none"}
+ALLOWED_ACTION_PRIORITIES = {"P0", "P1", "P2", "P3"}
+ALLOWED_RECOMMENDED_OWNERS = {"质检", "销售主管", "客服", "法务", "无需处理"}
+ALLOWED_ACTION_TYPES = {"立即介入", "主管复核", "客服跟进", "销售安抚", "培训复盘", "误报观察", "无需处理"}
+ALLOWED_FOLLOW_UP_DEADLINES = {"立即", "今日内", "24小时内", "3日内", "无需跟进"}
+
+
+def _coerce_bool(value, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "y", "是", "需要"}
+    if value is None:
+        return default
+    return bool(value)
+
+
+def _coerce_confidence(value) -> float:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(1.0, confidence))
+
+
+def _defaults_for_risk_level(risk_level: str) -> dict:
+    if risk_level == "none":
+        return {
+            "action_priority": "P3",
+            "recommended_owner": "无需处理",
+            "action_type": "无需处理",
+            "follow_up_deadline": "无需跟进",
+            "needs_manual_review": False,
+        }
+    if risk_level == "low":
+        return {
+            "action_priority": "P2",
+            "recommended_owner": "质检",
+            "action_type": "误报观察",
+            "follow_up_deadline": "24小时内",
+            "needs_manual_review": False,
+        }
+    if risk_level == "medium":
+        return {
+            "action_priority": "P1",
+            "recommended_owner": "质检",
+            "action_type": "主管复核",
+            "follow_up_deadline": "今日内",
+            "needs_manual_review": True,
+        }
+    if risk_level == "high":
+        return {
+            "action_priority": "P0",
+            "recommended_owner": "质检",
+            "action_type": "立即介入",
+            "follow_up_deadline": "立即",
+            "needs_manual_review": True,
+        }
+    return {
+        "action_priority": "P1",
+        "recommended_owner": "质检",
+        "action_type": "主管复核",
+        "follow_up_deadline": "今日内",
+        "needs_manual_review": True,
+    }
+
+
+def _normalize_quality_result(raw: dict | None) -> dict:
+    """规范化 AI 质检结果，确保调用方拿到可落库字段。"""
+    if not isinstance(raw, dict):
+        raw = {}
+    raw = raw or {}
+
+    risk_level = raw.get("risk_level")
+    if risk_level not in ALLOWED_RISK_LEVELS:
+        risk_level = "unknown"
+
+    defaults = _defaults_for_risk_level(risk_level)
+
+    risk_category = raw.get("risk_category")
+    if risk_category not in ALLOWED_RISK_CATEGORIES:
+        risk_category = "其他"
+
+    trigger_party = raw.get("trigger_party")
+    if trigger_party not in ALLOWED_TRIGGER_PARTIES:
+        trigger_party = None
+
+    issue_summary = str(raw.get("issue_summary") or "").strip()
+    if not issue_summary:
+        issue_summary = "请人工复核质检结果" if risk_level == "unknown" else "未检测到明确风险"
+    issue_summary = issue_summary[:50]
+
+    action_priority = raw.get("action_priority")
+    if action_priority not in ALLOWED_ACTION_PRIORITIES:
+        action_priority = defaults["action_priority"]
+
+    recommended_owner = raw.get("recommended_owner")
+    if recommended_owner not in ALLOWED_RECOMMENDED_OWNERS:
+        recommended_owner = defaults["recommended_owner"]
+
+    action_type = raw.get("action_type")
+    if action_type not in ALLOWED_ACTION_TYPES:
+        action_type = defaults["action_type"]
+
+    follow_up_deadline = raw.get("follow_up_deadline")
+    if follow_up_deadline not in ALLOWED_FOLLOW_UP_DEADLINES:
+        follow_up_deadline = defaults["follow_up_deadline"]
+
+    guidance = raw.get("guidance")
+    if not isinstance(guidance, dict):
+        guidance = {}
+
+    key_evidence = raw.get("key_evidence")
+    if not isinstance(key_evidence, list):
+        key_evidence = []
+
+    return {
+        "risk_level": risk_level,
+        "risk_category": risk_category,
+        "trigger_party": trigger_party,
+        "issue_summary": issue_summary,
+        "action_priority": action_priority,
+        "recommended_owner": recommended_owner,
+        "action_type": action_type,
+        "follow_up_deadline": follow_up_deadline,
+        "needs_manual_review": _coerce_bool(raw.get("needs_manual_review"), defaults["needs_manual_review"]),
+        "confidence": _coerce_confidence(raw.get("confidence")),
+        "guidance": guidance,
+        "key_evidence": key_evidence,
+    }
+
+
 def _get_active_keywords() -> list[dict]:
     """从数据库获取所有启用的关键词"""
     with Session(sync_engine) as session:
@@ -100,19 +234,32 @@ def _parse_ai_response(raw: str) -> dict:
         json_end = raw.rfind("}") + 1
         if json_start >= 0 and json_end > json_start:
             json_str = raw[json_start:json_end]
-            return json.loads(json_str)
+            return _normalize_quality_result(json.loads(json_str))
     except json.JSONDecodeError:
         pass
 
     # 无法解析时返回默认值
-    return {
+    return _normalize_quality_result({
         "risk_level": "unknown",
-        "risk_category": "未知",
+        "risk_category": "其他",
         "trigger_party": None,
-        "risk_description": "AI响应解析失败",
-        "suggested_action": "请人工复核",
+        "issue_summary": "AI响应解析失败，请人工复核",
+        "action_priority": "P1",
+        "recommended_owner": "质检",
+        "action_type": "主管复核",
+        "follow_up_deadline": "今日内",
+        "needs_manual_review": True,
+        "confidence": 0.0,
+        "guidance": {
+            "risk_reason": "AI响应无法解析，需人工查看聊天记录确认风险。",
+            "customer_intent": "未知",
+            "immediate_action": "请质检人员人工复核该聊天记录。",
+            "reply_suggestion": "",
+            "training_suggestion": "",
+            "escalation_reason": "",
+        },
         "key_evidence": [],
-    }
+    })
 
 
 def _ai_deep_analysis(chat_records: list, keyword_matches: list) -> dict:
@@ -153,15 +300,28 @@ def _ai_deep_analysis(chat_records: list, keyword_matches: list) -> dict:
             break
 
     # 所有重试都失败
-    return {
+    result = _normalize_quality_result({
         "risk_level": "unknown",
-        "risk_category": "未知",
+        "risk_category": "其他",
         "trigger_party": None,
-        "risk_description": f"AI分析失败: {last_error}",
-        "suggested_action": "请人工复核",
+        "issue_summary": "AI分析失败，请人工复核",
+        "action_priority": "P1",
+        "recommended_owner": "质检",
+        "action_type": "主管复核",
+        "follow_up_deadline": "今日内",
+        "needs_manual_review": True,
+        "guidance": {
+            "risk_reason": f"AI分析失败: {last_error}",
+            "customer_intent": "未知",
+            "immediate_action": "请质检人员人工复核该聊天记录。",
+            "reply_suggestion": "",
+            "training_suggestion": "",
+            "escalation_reason": "",
+        },
         "key_evidence": [],
-        "raw_response": None,
-    }
+    })
+    result["raw_response"] = None
+    return result
 
 
 @AgentRegistry.register("质检检测")
@@ -227,31 +387,46 @@ def quality_check_agent(
     if keyword_result["detected"] == "no":
         # 未检测到关键词，直接返回
         base_result["status"] = "no_keyword"
-        base_result["risk_level"] = "none"
-        base_result["risk_category"] = "无风险"
-        base_result["trigger_party"] = None
-        base_result["risk_description"] = "未检测到风险关键词"
-        base_result["suggested_action"] = "无需处理"
-        base_result["key_evidence"] = []
-        return base_result
+        normalized = _normalize_quality_result({
+            "risk_level": "none",
+            "risk_category": "其他",
+            "trigger_party": "none",
+            "issue_summary": "未检测到风险关键词",
+            "action_priority": "P3",
+            "recommended_owner": "无需处理",
+            "action_type": "无需处理",
+            "follow_up_deadline": "无需跟进",
+            "needs_manual_review": False,
+            "confidence": 1.0,
+            "guidance": {
+                "risk_reason": "本地关键词预检测未命中风险关键词。",
+                "customer_intent": "无明确风险诉求",
+                "immediate_action": "无需处理",
+                "reply_suggestion": "",
+                "training_suggestion": "",
+                "escalation_reason": "",
+            },
+            "key_evidence": [],
+        })
+        return {**base_result, **normalized}
 
     # 步骤2: AI深度分析（仅当检测到关键词时执行）
     ai_result = _ai_deep_analysis(chat_records, keyword_result["keyword_matches"])
-
-    # 直接使用AI返回的trigger_party
-    trigger_party = ai_result.get("trigger_party")
-    # 校验trigger_party值是否合法
-    if trigger_party not in ("sales", "customer", "both", "none"):
-        trigger_party = None
 
     # 合并结果
     return {
         **base_result,
         "risk_level": ai_result.get("risk_level", "unknown"),
-        "risk_category": ai_result.get("risk_category", "未知"),
-        "trigger_party": trigger_party,
-        "risk_description": ai_result.get("risk_description", ""),
-        "suggested_action": ai_result.get("suggested_action", ""),
+        "risk_category": ai_result.get("risk_category", "其他"),
+        "trigger_party": ai_result.get("trigger_party"),
+        "issue_summary": ai_result.get("issue_summary", ""),
+        "action_priority": ai_result.get("action_priority"),
+        "recommended_owner": ai_result.get("recommended_owner"),
+        "action_type": ai_result.get("action_type"),
+        "follow_up_deadline": ai_result.get("follow_up_deadline"),
+        "needs_manual_review": ai_result.get("needs_manual_review"),
+        "confidence": ai_result.get("confidence"),
+        "guidance": ai_result.get("guidance", {}),
         "key_evidence": ai_result.get("key_evidence", []),
         "raw_response": ai_result.get("raw_response"),
     }

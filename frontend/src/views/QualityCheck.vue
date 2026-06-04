@@ -142,11 +142,14 @@
           <span :class="['qc-risk-badge', detailData.risk_level]">{{ getRiskLevelText(detailData.risk_level) }}</span>
         </a-descriptions-item>
         <a-descriptions-item v-if="detailData.risk_category" label="风险类别">{{ detailData.risk_category }}</a-descriptions-item>
-        <a-descriptions-item v-if="detailData.risk_description" label="风险描述">
-          <pre style="white-space: pre-wrap; margin: 0">{{ detailData.risk_description }}</pre>
+        <a-descriptions-item v-if="detailData.issue_summary" label="问题摘要">
+          <pre style="white-space: pre-wrap; margin: 0">{{ detailData.issue_summary }}</pre>
         </a-descriptions-item>
-        <a-descriptions-item v-if="detailData.suggested_action" label="建议措施">
-          <pre style="white-space: pre-wrap; margin: 0">{{ detailData.suggested_action }}</pre>
+        <a-descriptions-item v-if="detailData.guidance && detailData.guidance.immediate_action" label="处理动作">
+          <pre style="white-space: pre-wrap; margin: 0">{{ detailData.guidance.immediate_action }}</pre>
+        </a-descriptions-item>
+        <a-descriptions-item v-if="detailData.guidance && detailData.guidance.reply_suggestion" label="建议话术">
+          <pre style="white-space: pre-wrap; margin: 0">{{ detailData.guidance.reply_suggestion }}</pre>
         </a-descriptions-item>
       </a-descriptions>
     </a-modal>

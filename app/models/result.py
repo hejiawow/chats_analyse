@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """分析结果数据模型 — 拆分为转介绍检测和优秀案例提取两张表"""
-from sqlalchemy import Column, BigInteger, Integer, String, Text, DateTime, Boolean, Index, ForeignKey
+from sqlalchemy import Column, BigInteger, Integer, String, Text, DateTime, Boolean, Float, Index, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 
@@ -319,8 +319,15 @@ class QualityCheckResult(Base):
     # === AI深度分析结果 ===
     risk_level = Column(String(16), nullable=True, comment="风险等级：high/medium/low/none")
     risk_category = Column(String(64), nullable=True, comment="风险类别：投诉/退款/退费/取消订单等")
-    risk_description = Column(Text, nullable=True, comment="风险描述")
     trigger_party = Column(String(16), nullable=True, comment="触发方：sales/customer/both")
+    issue_summary = Column(String(256), nullable=True, comment="一句话问题摘要")
+    action_priority = Column(String(8), nullable=True, comment="处理优先级：P0/P1/P2/P3")
+    recommended_owner = Column(String(32), nullable=True, comment="建议责任方")
+    action_type = Column(String(32), nullable=True, comment="建议动作类型")
+    follow_up_deadline = Column(String(32), nullable=True, comment="建议处理时限")
+    needs_manual_review = Column(Boolean, default=False, comment="是否需要人工复核")
+    confidence = Column(Float, nullable=True, comment="AI置信度：0到1")
+    process_status = Column(String(32), default="pending", comment="处理状态：pending/processing/resolved/false_positive/escalated")
 
     # === 状态 ===
     status = Column(String(16), default="success", comment="success/failed/no_chat/no_keyword")
@@ -355,8 +362,15 @@ class QualityCheckResult(Base):
             "detected_keywords": self.detected_keywords,
             "risk_level": self.risk_level,
             "risk_category": self.risk_category,
-            "risk_description": self.risk_description,
             "trigger_party": self.trigger_party,
+            "issue_summary": self.issue_summary,
+            "action_priority": self.action_priority,
+            "recommended_owner": self.recommended_owner,
+            "action_type": self.action_type,
+            "follow_up_deadline": self.follow_up_deadline,
+            "needs_manual_review": self.needs_manual_review,
+            "confidence": self.confidence,
+            "process_status": self.process_status,
             "status": self.status,
             "error_msg": self.error_msg,
             "task_id": self.task_id,
@@ -377,6 +391,8 @@ class QualityCheckResult(Base):
         Index("ix_quality_check_user_created", "user_id", "created_at"),
         Index("ix_quality_check_trigger_party", "trigger_party"),
         Index("ix_quality_check_task_id", "task_id"),
+        Index("ix_quality_check_action_priority", "action_priority"),
+        Index("ix_quality_check_process_status", "process_status"),
     )
 
 
@@ -441,9 +457,9 @@ class QualityCheckDetail(Base):
     result_id = Column(Integer, ForeignKey("quality_check_results.id"), nullable=False, unique=True, comment="关联质检结果ID")
 
     # === 大字段 ===
+    guidance = Column(JSONB, nullable=True, comment="AI完整处理建议")
     keyword_matches = Column(JSONB, nullable=True, comment="关键词匹配详情：[{keyword, message, time, speaker}]")
     key_evidence = Column(JSONB, nullable=True, comment="关键证据：[{content, time, speaker}]")
-    suggested_action = Column(Text, nullable=True, comment="建议处理措施")
     raw_response = Column(Text, nullable=True, comment="AI原始响应")
 
     created_at = Column(DateTime, default=lambda: now_shanghai(), comment="创建时间")
@@ -452,9 +468,9 @@ class QualityCheckDetail(Base):
         return {
             "id": self.id,
             "result_id": self.result_id,
+            "guidance": self.guidance,
             "keyword_matches": self.keyword_matches,
             "key_evidence": self.key_evidence,
-            "suggested_action": self.suggested_action,
             "raw_response": self.raw_response,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

@@ -345,15 +345,20 @@ def run_analysis(self, task_id: str, user_id: str, friend_id: int,
                         friend_id=friend_id,
                         friend_wx_id=friend_wx_id,
                         friend_nick=friend_nick,
-                        check_time_start=result.get("check_time_start"),
-                        check_time_end=result.get("check_time_end"),
                         chat_record_count=result.get("chat_record_count"),
                         keyword_detected=result.get("keyword_detected", "no"),
                         detected_keywords=result.get("detected_keywords"),
                         risk_level=result.get("risk_level"),
                         risk_category=result.get("risk_category"),
                         trigger_party=result.get("trigger_party"),
-                        risk_description=result.get("risk_description"),
+                        issue_summary=result.get("issue_summary"),
+                        action_priority=result.get("action_priority"),
+                        recommended_owner=result.get("recommended_owner"),
+                        action_type=result.get("action_type"),
+                        follow_up_deadline=result.get("follow_up_deadline"),
+                        needs_manual_review=result.get("needs_manual_review"),
+                        confidence=result.get("confidence"),
+                        process_status=result.get("process_status", "pending"),
                         status=result.get("status", "success"),
                         created_at=now_shanghai(),
                     )
@@ -361,14 +366,14 @@ def run_analysis(self, task_id: str, user_id: str, friend_id: int,
                     session.flush()  # 获取 record.id
 
                     # 保存详情表记录（大字段）
-                    if result.get("keyword_matches") or result.get("key_evidence") or result.get("suggested_action") or result.get("raw_response"):
+                    if result.get("guidance") or result.get("keyword_matches") or result.get("key_evidence") or result.get("raw_response"):
                         detail = QualityCheckDetail(
                             result_id=record.id,
+                            guidance=result.get("guidance"),
                             keyword_matches=result.get("keyword_matches"),
                             key_evidence=result.get("key_evidence"),
-                            suggested_action=result.get("suggested_action"),
                             raw_response=result.get("raw_response"),
-                            created_at=datetime.now(),
+                            created_at=now_shanghai(),
                         )
                         session.add(detail)
 

@@ -46,7 +46,7 @@ def _apply_task_join(stmt):
 
 
 def escape_like_pattern(pattern: str) -> str:
-    """Escape special LIKE wildcards (% _, \)"""
+    """Escape special LIKE wildcards (% _, backslash)."""
     return pattern.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
@@ -72,6 +72,28 @@ def _build_risk_keyword_filter(stmt, risk_levels: List[str] | None, keywords: Li
     return stmt
 
 
+def _apply_processing_filters(
+    stmt,
+    action_priority: str | None = None,
+    recommended_owner: str | None = None,
+    action_type: str | None = None,
+    needs_manual_review: bool | None = None,
+    process_status: str | None = None,
+):
+    """应用质检处理建议相关筛选。"""
+    if action_priority:
+        stmt = stmt.where(QualityCheckResult.action_priority == action_priority)
+    if recommended_owner:
+        stmt = stmt.where(QualityCheckResult.recommended_owner == recommended_owner)
+    if action_type:
+        stmt = stmt.where(QualityCheckResult.action_type == action_type)
+    if needs_manual_review is not None:
+        stmt = stmt.where(QualityCheckResult.needs_manual_review == needs_manual_review)
+    if process_status:
+        stmt = stmt.where(QualityCheckResult.process_status == process_status)
+    return stmt
+
+
 @router.get("/quality-check")
 async def query_quality_check_results(
     user_id: str | None = Query(None, description="销售ID"),
@@ -84,6 +106,11 @@ async def query_quality_check_results(
     start_time: str | None = Query(None, description="开始时间（YYYY-MM-DD HH:mm:ss）"),
     end_time: str | None = Query(None, description="结束时间（YYYY-MM-DD HH:mm:ss）"),
     task_id: int | None = Query(None, description="关联质检任务ID"),
+    action_priority: str | None = Query(None, description="处理优先级：P0/P1/P2/P3"),
+    recommended_owner: str | None = Query(None, description="建议责任方"),
+    action_type: str | None = Query(None, description="建议动作类型"),
+    needs_manual_review: bool | None = Query(None, description="是否需要人工复核"),
+    process_status: str | None = Query(None, description="处理状态"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: dict = Depends(require_permission("read:quality_check")),
@@ -103,6 +130,7 @@ async def query_quality_check_results(
         if friend_id is not None:
             stmt = stmt.where(QualityCheckResult.friend_id == friend_id)
         stmt = _build_risk_keyword_filter(stmt, risk_levels, keywords)
+        stmt = _apply_processing_filters(stmt, action_priority, recommended_owner, action_type, needs_manual_review, process_status)
         if trigger_party:
             stmt = stmt.where(QualityCheckResult.trigger_party == trigger_party)
 
@@ -128,6 +156,7 @@ async def query_quality_check_results(
         if friend_id is not None:
             count_stmt = count_stmt.where(QualityCheckResult.friend_id == friend_id)
         count_stmt = _build_risk_keyword_filter(count_stmt, risk_levels, keywords)
+        count_stmt = _apply_processing_filters(count_stmt, action_priority, recommended_owner, action_type, needs_manual_review, process_status)
         if trigger_party:
             count_stmt = count_stmt.where(QualityCheckResult.trigger_party == trigger_party)
         if task_id is not None:
@@ -301,6 +330,11 @@ async def export_quality_check_results(
     risk_levels: List[str] = Query(None, alias="risk_levels[]", description="风险等级列表"),
     keywords: List[str] = Query(None, alias="keywords[]", description="关键词列表"),
     trigger_party: str | None = Query(None, description="触发方：sales/customer/both"),
+    action_priority: str | None = Query(None, description="处理优先级：P0/P1/P2/P3"),
+    recommended_owner: str | None = Query(None, description="建议责任方"),
+    action_type: str | None = Query(None, description="建议动作类型"),
+    needs_manual_review: bool | None = Query(None, description="是否需要人工复核"),
+    process_status: str | None = Query(None, description="处理状态"),
     start_time: str | None = Query(None, description="开始时间（YYYY-MM-DD HH:mm:ss）"),
     end_time: str | None = Query(None, description="结束时间（YYYY-MM-DD HH:mm:ss）"),
     limit: int = Query(10000, ge=1, le=50000, description="导出数量上限"),
@@ -322,6 +356,7 @@ async def export_quality_check_results(
         if friend_id is not None:
             stmt = stmt.where(QualityCheckResult.friend_id == friend_id)
         stmt = _build_risk_keyword_filter(stmt, risk_levels, keywords)
+        stmt = _apply_processing_filters(stmt, action_priority, recommended_owner, action_type, needs_manual_review, process_status)
         if trigger_party:
             stmt = stmt.where(QualityCheckResult.trigger_party == trigger_party)
         if time_filter is not None:
@@ -349,7 +384,8 @@ async def export_quality_check_results(
         "ID", "销售ID", "好友ID", "好友姓名", "好友备注", "好友别名", "绑定手机号", "备注手机号",
         "检测时间范围", "聊天记录数",
         "关键词检测", "检测关键词", "风险等级", "触发方", "风险类别",
-        "风险描述", "创建时间"
+        "问题摘要", "处理优先级", "建议责任方", "建议动作类型", "处理时限",
+        "需人工复核", "AI置信度", "处理状态", "创建时间"
     ])
 
     # 数据行
@@ -373,7 +409,14 @@ async def export_quality_check_results(
             r.risk_level or "",
             r.trigger_party or "",
             r.risk_category or "",
-            r.risk_description or "",
+            r.issue_summary or "",
+            r.action_priority or "",
+            r.recommended_owner or "",
+            r.action_type or "",
+            r.follow_up_deadline or "",
+            "是" if r.needs_manual_review else "否",
+            r.confidence if r.confidence is not None else "",
+            r.process_status or "",
             r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else "",
         ])
 
@@ -547,9 +590,9 @@ async def get_quality_check_detail(
                 data["check_time_end"] = task.end_time
 
         if detail:
+            data["guidance"] = detail.guidance
             data["keyword_matches"] = detail.keyword_matches
             data["key_evidence"] = detail.key_evidence
-            data["suggested_action"] = detail.suggested_action
             data["raw_response"] = detail.raw_response
 
         return data
@@ -569,6 +612,7 @@ def invalidate_quality_check_stats_cache(user_id: str = None) -> None:
 class QualityCheckUpdateRequest(BaseModel):
     risk_level: str | None = None
     remark: str | None = None
+    process_status: str | None = None
 
 
 @router.put("/quality-check/{result_id}")
@@ -577,7 +621,7 @@ async def update_quality_check_result(
     request: QualityCheckUpdateRequest,
     current_user: dict = Depends(require_permission("update:quality_check")),
 ):
-    """修改质检结果的风险等级和备注（带审计日志）
+    """修改质检结果的风险等级、处理状态和备注（带审计日志）
 
     逻辑说明：
     - 只有当风险等级实际改变时，才更新 modified_risk_level
@@ -597,16 +641,19 @@ async def update_quality_check_result(
         old_effective_risk_level = record.modified_risk_level or record.risk_level  # 当前生效的风险等级
         old_original_risk_level = record.risk_level  # AI 原始检测的风险等级
         old_remark = record.remark or ""
+        old_process_status = record.process_status or "pending"
 
         # 3. 确定新值
         new_risk_level = request.risk_level if request.risk_level is not None else old_effective_risk_level
         new_remark = request.remark if request.remark is not None else old_remark
+        new_process_status = request.process_status if request.process_status is not None else old_process_status
 
         # 4. 检查是否有实际修改
         risk_level_changed = new_risk_level != old_effective_risk_level
         remark_changed = new_remark != old_remark
+        process_status_changed = new_process_status != old_process_status
 
-        if not risk_level_changed and not remark_changed:
+        if not risk_level_changed and not remark_changed and not process_status_changed:
             return {"message": "无实际修改", "data": record.to_dict()}
 
         # 5. 确定 modified_risk_level 的最终值
@@ -634,6 +681,7 @@ async def update_quality_check_result(
         # 7. 更新主记录
         record.remark = new_remark
         record.modified_risk_level = final_modified_risk_level
+        record.process_status = new_process_status
         record.modified_at = now_shanghai()
         record.modified_by = str(current_user["user_id"])
         record.modified_by_name = current_user["username"]
@@ -642,11 +690,6 @@ async def update_quality_check_result(
 
         # 8. 清除统计缓存
         invalidate_quality_check_stats_cache()
-
-        return {
-            "message": "修改成功",
-            "data": record.to_dict(),
-        }
 
         return {
             "message": "修改成功",
