@@ -2,7 +2,7 @@
 """质检检测结果查询 API"""
 import io
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 from pydantic import BaseModel
 from fastapi import APIRouter, Query, Depends
 from fastapi.responses import StreamingResponse
@@ -15,7 +15,7 @@ from app.models.result import QualityCheckResult, QualityCheckModificationLog, Q
 from app.services.dependencies import require_permission, get_current_user
 from app.services.cache import cache_get, cache_set, cache_delete, cache_clear_pattern
 from app.services.hujing_api import get_chat_records, get_chat_records_for_quality_check
-from config import now_shanghai
+from config import now_shanghai, settings
 
 _STATS_CACHE_TTL = 300  # 统计缓存：5 分钟
 _STATS_CACHE_KEY = "quality_check:stats"
@@ -496,11 +496,9 @@ async def get_quality_check_chat_records(
         )
 
         # 计算实际查询时间范围（与分析时一致）
-        from datetime import datetime as dt, timedelta as td
-        from config import settings
         if task_end_time:
-            end_dt = dt.strptime(task_end_time, "%Y-%m-%d %H:%M:%S")
-            actual_start = (end_dt - td(days=settings.QUALITY_CHECK_CHAT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+            end_dt = datetime.strptime(task_end_time, "%Y-%m-%d %H:%M:%S")
+            actual_start = (end_dt - timedelta(days=settings.QUALITY_CHECK_CHAT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
         else:
             actual_start = None
 

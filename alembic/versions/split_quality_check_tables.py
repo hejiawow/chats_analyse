@@ -1,7 +1,7 @@
 """split quality_check tables - move large fields to detail table
 
 Revision ID: split_quality_tables
-Revises: 9792cbce10e5
+Revises: 0003_quality_mod
 Create Date: 2026-06-04
 
 """
@@ -14,7 +14,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = 'split_quality_tables'
-down_revision: Union[str, None] = '9792cbce10e5'
+down_revision: Union[str, None] = '0003_quality_mod'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

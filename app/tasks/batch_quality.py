@@ -191,7 +191,7 @@ def _create_task_record(batch_task_id: str, start_time: str, end_time: str,
             end_time=end_time,
             user_id_filter=user_id_filter,
             triggered_by=triggered_by,
-            created_at=datetime.now(),
+            created_at=now_shanghai(),
         )
         session.add(task)
         session.commit()
@@ -289,7 +289,7 @@ def run_single_batch_check(self, batch_task_id: str, db_task_id: int, user_id: s
                         key_evidence=result.get("key_evidence"),
                         suggested_action=result.get("suggested_action"),
                         raw_response=result.get("raw_response"),
-                        created_at=datetime.now(),
+                        created_at=now_shanghai(),
                     )
                     session.add(detail)
 
@@ -352,7 +352,7 @@ def on_batch_complete(self, results, batch_task_id: str):
         no_chat_count=no_chat_count,
         failed_count=failed_count,
         cancelled_count=cancelled_count,
-        finished_at=datetime.now(),
+        finished_at=now_shanghai(),
     )
 
     # 清除取消标记
@@ -396,7 +396,7 @@ def run_batch_quality_check(self, batch_task_id: str, start_time: str, end_time:
 
     if not pairs:
         update_batch_progress(batch_task_id, 0, 0, "no_pairs")
-        _update_task_status(batch_task_id, status="no_pairs", finished_at=datetime.now())
+        _update_task_status(batch_task_id, status="no_pairs", finished_at=now_shanghai())
         return {"status": "no_pairs", "message": "时间范围内无聊天记录"}
 
     # 3. 可选：按 user_id 筛选
@@ -518,7 +518,7 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, db_task_id: int,
                         key_evidence=result.get("key_evidence"),
                         suggested_action=result.get("suggested_action"),
                         raw_response=result.get("raw_response"),
-                        created_at=datetime.now(),
+                        created_at=now_shanghai(),
                     )
                     session.add(detail)
 
@@ -602,14 +602,14 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
             update_batch_progress(batch_task_id, 0, 0, "error", error_message=error_msg)
         except Exception:
             logger.exception(f"Failed to update progress for task {batch_task_id}")
-        _update_task_status(batch_task_id, status="error", error_message=error_msg, finished_at=datetime.now())
+        _update_task_status(batch_task_id, status="error", error_message=error_msg, finished_at=now_shanghai())
         release_cli_lock(batch_task_id)
         return {"status": "error", "error_message": error_msg}
 
     if not all_messages:
         _log(batch_task_id, "[无数据] 时间范围内无聊天记录", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_messages")
-        _update_task_status(batch_task_id, status="no_messages", finished_at=datetime.now())
+        _update_task_status(batch_task_id, status="no_messages", finished_at=now_shanghai())
         release_cli_lock(batch_task_id)
         return {"status": "no_messages", "message": "时间范围内无聊天记录"}
 
@@ -678,7 +678,7 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
     if not matched_pairs:
         _log(batch_task_id, "[完成] 未匹配到任何关键词", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_matches")
-        _update_task_status(batch_task_id, status="no_matches", finished_at=datetime.now())
+        _update_task_status(batch_task_id, status="no_matches", finished_at=now_shanghai())
         release_cli_lock(batch_task_id)
         return {"status": "no_matches", "message": "未匹配到任何关键词", "total_pairs": 0}
 
@@ -702,7 +702,7 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
     if not matched_pairs:
         _log(batch_task_id, "[完成] 过滤后无待分析的销售-好友对", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_matches")
-        _update_task_status(batch_task_id, status="no_matches", filtered_count=filtered_count, finished_at=datetime.now())
+        _update_task_status(batch_task_id, status="no_matches", filtered_count=filtered_count, finished_at=now_shanghai())
         release_cli_lock(batch_task_id)
         return {"status": "no_matches", "message": "过滤后无待分析的销售-好友对", "total_pairs": 0,
                 "filtered_count": filtered_count}

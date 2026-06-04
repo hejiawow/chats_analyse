@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """分析结果数据模型 — 拆分为转介绍检测和优秀案例提取两张表"""
-from sqlalchemy import Column, BigInteger, Integer, String, Text, DateTime, Boolean, Index, ForeignKey, ForeignKey
+from sqlalchemy import Column, BigInteger, Integer, String, Text, DateTime, Boolean, Index, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 
@@ -257,7 +257,7 @@ class QualityCheckTask(Base):
     triggered_by = Column(String(64), nullable=True, comment="触发人（CLI/API/cron）")
 
     # === 时间 ===
-    created_at = Column(DateTime, default=lambda: datetime.now(), comment="任务发起时间")
+    created_at = Column(DateTime, default=lambda: now_shanghai(), comment="任务发起时间")
     finished_at = Column(DateTime, nullable=True, comment="任务结束时间")
 
     def to_dict(self) -> dict:
@@ -446,7 +446,7 @@ class QualityCheckDetail(Base):
     suggested_action = Column(Text, nullable=True, comment="建议处理措施")
     raw_response = Column(Text, nullable=True, comment="AI原始响应")
 
-    created_at = Column(DateTime, default=lambda: datetime.now(), comment="创建时间")
+    created_at = Column(DateTime, default=lambda: now_shanghai(), comment="创建时间")
 
     def to_dict(self) -> dict:
         return {
