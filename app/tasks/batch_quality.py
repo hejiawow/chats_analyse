@@ -10,7 +10,7 @@ from app.celery_app import celery_app
 from app.services.hujing_api import get_chat_pairs, get_chat_records, get_all_chat_messages, get_all_sales, get_friends_list, get_chat_records_for_quality_check
 from app.agents.quality_check import quality_check_agent
 from app.models.database import sync_engine
-from app.models.result import QualityCheckResult
+from app.models.result import QualityCheckResult, QualityCheckDetail, QualityCheckTask
 from config import settings, now_shanghai
 from app.api.quality_check_query import invalidate_quality_check_stats_cache
 from app.services.cache import cache_clear_pattern
@@ -178,8 +178,42 @@ def release_cli_lock(batch_task_id: str):
     redis_client.eval(_RELEASE_CLI_LOCK_SCRIPT, 1, "batch:quality:cli_lock", batch_task_id)
 
 
+# === 质检任务表持久化操作 ===
+
+def _create_task_record(batch_task_id: str, start_time: str, end_time: str,
+                        user_id_filter: str = None, triggered_by: str = "CLI") -> int:
+    """在数据库创建质检任务记录，返回 task.id"""
+    with Session(sync_engine) as session:
+        task = QualityCheckTask(
+            batch_task_id=batch_task_id,
+            status="running",
+            start_time=start_time,
+            end_time=end_time,
+            user_id_filter=user_id_filter,
+            triggered_by=triggered_by,
+            created_at=now_shanghai(),
+        )
+        session.add(task)
+        session.commit()
+        session.refresh(task)
+        return task.id
+
+
+def _update_task_status(batch_task_id: str, **kwargs):
+    """更新数据库中的质检任务状态"""
+    with Session(sync_engine) as session:
+        from sqlalchemy import update
+        stmt = (
+            update(QualityCheckTask)
+            .where(QualityCheckTask.batch_task_id == batch_task_id)
+            .values(**kwargs)
+        )
+        session.execute(stmt)
+        session.commit()
+
+
 @celery_app.task(bind=True, name="app.tasks.batch_quality.run_single_batch_check", rate_limit="20/m")
-def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: int,
+def run_single_batch_check(self, batch_task_id: str, db_task_id: int, user_id: str, friend_id: int,
                            start_time: str, end_time: str):
     """批量质检子任务：对单个聊天对进行质检分析"""
     # 检查任务是否被取消
@@ -223,6 +257,7 @@ def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: in
             user_name = _get_user_name(user_id)
             friend_info = _get_friend_info(user_id, friend_id)
             with Session(sync_engine) as session:
+                # 保存主表记录（不含大字段）
                 record = QualityCheckResult(
                     user_id=user_id,
                     user_name=user_name,
@@ -232,24 +267,32 @@ def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: in
                     alias=friend_info.get("alias"),
                     phone=friend_info.get("phone"),
                     remark_phone=friend_info.get("remark_phone"),
-                    check_time_start=actual_start_time,
-                    check_time_end=end_time,
                     chat_record_count=result.get("chat_record_count", len(chat_records)),
                     keyword_detected=result.get("keyword_detected", "no"),
                     detected_keywords=result.get("detected_keywords"),
-                    keyword_matches=result.get("keyword_matches"),
                     risk_level=result.get("risk_level"),
                     risk_category=result.get("risk_category"),
                     trigger_party=result.get("trigger_party"),
                     risk_description=result.get("risk_description"),
-                    suggested_action=result.get("suggested_action"),
-                    key_evidence=result.get("key_evidence"),
-                    raw_response=result.get("raw_response"),
                     status=result.get("status", "success"),
-                    batch_task_id=batch_task_id,
+                    task_id=db_task_id,
                     created_at=now_shanghai(),
                 )
                 session.add(record)
+                session.flush()  # 获取 record.id
+
+                # 保存详情表记录（大字段）
+                if result.get("keyword_matches") or result.get("key_evidence") or result.get("suggested_action") or result.get("raw_response"):
+                    detail = QualityCheckDetail(
+                        result_id=record.id,
+                        keyword_matches=result.get("keyword_matches"),
+                        key_evidence=result.get("key_evidence"),
+                        suggested_action=result.get("suggested_action"),
+                        raw_response=result.get("raw_response"),
+                        created_at=now_shanghai(),
+                    )
+                    session.add(detail)
+
                 session.commit()
 
         # 更新进度
@@ -277,7 +320,7 @@ def run_single_batch_check(self, batch_task_id: str, user_id: str, friend_id: in
 
 @celery_app.task(bind=True, name="app.tasks.batch_quality.on_batch_complete")
 def on_batch_complete(self, results, batch_task_id: str):
-    """批量质检完成回调：更新最终状态"""
+    """批量质检完成回调：更新最终状态（Redis + DB）"""
     # 统计结果
     risk_count = sum(1 for r in results if r.get("keyword_detected") == "yes")
     no_chat_count = sum(1 for r in results if r.get("status") == "no_chat")
@@ -288,7 +331,7 @@ def on_batch_complete(self, results, batch_task_id: str):
     was_cancelled = is_batch_cancelled(batch_task_id)
     final_status = "cancelled" if was_cancelled else "completed"
 
-    # 更新最终进度状态
+    # 更新 Redis 进度状态
     update_batch_progress(
         batch_task_id,
         completed=len(results),
@@ -298,6 +341,18 @@ def on_batch_complete(self, results, batch_task_id: str):
         no_chat=no_chat_count,
         failed=failed_count,
         cancelled=cancelled_count,
+    )
+
+    # 更新数据库任务记录
+    _update_task_status(
+        batch_task_id,
+        status=final_status,
+        completed_pairs=len(results),
+        risk_detected=risk_count,
+        no_chat_count=no_chat_count,
+        failed_count=failed_count,
+        cancelled_count=cancelled_count,
+        finished_at=now_shanghai(),
     )
 
     # 清除取消标记
@@ -332,28 +387,34 @@ def run_batch_quality_check(self, batch_task_id: str, start_time: str, end_time:
         user_id_filter: 可选，筛选特定销售ID
         limit: 最大分析数量
     """
-    # 1. 获取聊天对列表（指定时间范围）
+    # 1. 创建数据库任务记录
+    db_task_id = _create_task_record(batch_task_id, start_time, end_time, user_id_filter)
+
+    # 2. 获取聊天对列表（指定时间范围）
     pairs_data = get_chat_pairs(start_time, end_time)
     pairs = pairs_data.get("data", [])
 
     if not pairs:
         update_batch_progress(batch_task_id, 0, 0, "no_pairs")
+        _update_task_status(batch_task_id, status="no_pairs", finished_at=now_shanghai())
         return {"status": "no_pairs", "message": "时间范围内无聊天记录"}
 
-    # 2. 可选：按 user_id 筛选
+    # 3. 可选：按 user_id 筛选
     if user_id_filter:
         pairs = [p for p in pairs if p.get("user_id") == user_id_filter]
 
-    # 3. 限制数量
+    # 4. 限制数量
     pairs = pairs[:limit]
 
-    # 4. 初始化进度
+    # 5. 初始化进度
     update_batch_progress(batch_task_id, 0, len(pairs), "running")
+    _update_task_status(batch_task_id, total_pairs=len(pairs))
 
-    # 5. 创建子任务列表
+    # 6. 创建子任务列表
     subtasks = [
         run_single_batch_check.s(
             batch_task_id,
+            db_task_id,
             p.get("user_id"),
             p.get("friend_id"),
             start_time,
@@ -362,7 +423,7 @@ def run_batch_quality_check(self, batch_task_id: str, start_time: str, end_time:
         for p in pairs
     ]
 
-    # 6. 使用 chord：子任务完成后自动触发回调
+    # 7. 使用 chord：子任务完成后自动触发回调
     callback = on_batch_complete.s(batch_task_id)
     chord(subtasks)(callback)
 
@@ -373,7 +434,7 @@ def run_batch_quality_check(self, batch_task_id: str, start_time: str, end_time:
 
 
 @celery_app.task(bind=True, name="app.tasks.batch_quality.run_single_check_for_matched_pair")
-def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, friend_id: int,
+def run_single_check_for_matched_pair(self, batch_task_id: str, db_task_id: int, user_id: str, friend_id: int,
                                       start_time: str, end_time: str):
     """处理单个匹配到关键词的销售-好友对"""
     # 检查任务是否被取消
@@ -425,6 +486,7 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
             user_name = _get_user_name(user_id)
             friend_info = _get_friend_info(user_id, friend_id)
             with Session(sync_engine) as session:
+                # 保存主表记录（不含大字段）
                 record = QualityCheckResult(
                     user_id=user_id,
                     user_name=user_name,
@@ -434,24 +496,32 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, user_id: str, fr
                     alias=friend_info.get("alias"),
                     phone=friend_info.get("phone"),
                     remark_phone=friend_info.get("remark_phone"),
-                    check_time_start=actual_start_time,
-                    check_time_end=end_time,
                     chat_record_count=result.get("chat_record_count", len(chat_records)),
                     keyword_detected=result.get("keyword_detected", "no"),
                     detected_keywords=result.get("detected_keywords"),
-                    keyword_matches=result.get("keyword_matches"),
                     risk_level=result.get("risk_level"),
                     risk_category=result.get("risk_category"),
                     trigger_party=result.get("trigger_party"),
                     risk_description=result.get("risk_description"),
-                    suggested_action=result.get("suggested_action"),
-                    key_evidence=result.get("key_evidence"),
-                    raw_response=result.get("raw_response"),
                     status=result.get("status", "success"),
-                    batch_task_id=batch_task_id,
+                    task_id=db_task_id,
                     created_at=now_shanghai(),
                 )
                 session.add(record)
+                session.flush()  # 获取 record.id
+
+                # 保存详情表记录（大字段）
+                if result.get("keyword_matches") or result.get("key_evidence") or result.get("suggested_action") or result.get("raw_response"):
+                    detail = QualityCheckDetail(
+                        result_id=record.id,
+                        keyword_matches=result.get("keyword_matches"),
+                        key_evidence=result.get("key_evidence"),
+                        suggested_action=result.get("suggested_action"),
+                        raw_response=result.get("raw_response"),
+                        created_at=now_shanghai(),
+                    )
+                    session.add(detail)
+
                 session.commit()
         else:
             _log(batch_task_id, f"[正常] 销售:{user_id} 好友:{friend_id} 未检测到风险关键词", "info")
@@ -518,6 +588,9 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
     if user_id_filter:
         _log(batch_task_id, f"[筛选] 指定销售ID: {user_id_filter}", "info")
 
+    # 创建数据库任务记录
+    db_task_id = _create_task_record(batch_task_id, start_time, end_time, user_id_filter)
+
     # 1. 获取所有聊天记录（捕获 API 连接失败等错误）
     _log(batch_task_id, "[请求] 正在获取聊天记录...", "info")
     try:
@@ -529,12 +602,14 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
             update_batch_progress(batch_task_id, 0, 0, "error", error_message=error_msg)
         except Exception:
             logger.exception(f"Failed to update progress for task {batch_task_id}")
+        _update_task_status(batch_task_id, status="error", error_message=error_msg, finished_at=now_shanghai())
         release_cli_lock(batch_task_id)
         return {"status": "error", "error_message": error_msg}
 
     if not all_messages:
         _log(batch_task_id, "[无数据] 时间范围内无聊天记录", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_messages")
+        _update_task_status(batch_task_id, status="no_messages", finished_at=now_shanghai())
         release_cli_lock(batch_task_id)
         return {"status": "no_messages", "message": "时间范围内无聊天记录"}
 
@@ -603,6 +678,7 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
     if not matched_pairs:
         _log(batch_task_id, "[完成] 未匹配到任何关键词", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_matches")
+        _update_task_status(batch_task_id, status="no_matches", finished_at=now_shanghai())
         release_cli_lock(batch_task_id)
         return {"status": "no_matches", "message": "未匹配到任何关键词", "total_pairs": 0}
 
@@ -626,6 +702,7 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
     if not matched_pairs:
         _log(batch_task_id, "[完成] 过滤后无待分析的销售-好友对", "info")
         update_batch_progress(batch_task_id, 0, 0, "no_matches")
+        _update_task_status(batch_task_id, status="no_matches", filtered_count=filtered_count, finished_at=now_shanghai())
         release_cli_lock(batch_task_id)
         return {"status": "no_matches", "message": "过滤后无待分析的销售-好友对", "total_pairs": 0,
                 "filtered_count": filtered_count}
@@ -634,12 +711,14 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
 
     # 6. 初始化进度
     update_batch_progress(batch_task_id, 0, len(matched_pairs), "running")
+    _update_task_status(batch_task_id, total_pairs=len(matched_pairs), filtered_count=filtered_count)
     _log(batch_task_id, f"[分发] 开始分发 {len(matched_pairs)} 个子任务...", "info")
 
     # 7. 创建子任务列表
     subtasks = [
         run_single_check_for_matched_pair.s(
             batch_task_id,
+            db_task_id,
             pair[0],  # user_id
             pair[1],  # friend_id
             start_time,

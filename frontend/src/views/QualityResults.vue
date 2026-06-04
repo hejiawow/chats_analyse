@@ -267,8 +267,8 @@
       <div v-else class="chat-records-list">
         <div class="chat-records-header">
           共 {{ chatRecordsTotal }} 条聊天记录
-          <span v-if="detailData" style="margin-left: 12px; color: #666">
-            时间范围：{{ formatDateTime(detailData.check_time_start) }} ~ {{ formatDateTime(detailData.check_time_end) }}
+          <span v-if="chatRecordsTimeRange" style="margin-left: 12px; color: #666">
+            时间范围：{{ formatDateTime(chatRecordsTimeRange.start) }} ~ {{ formatDateTime(chatRecordsTimeRange.end) }}
           </span>
         </div>
         <div class="chat-records-content">
@@ -345,7 +345,7 @@
 import { ref, reactive, onMounted, watch, nextTick } from 'vue'
 import { message } from 'ant-design-vue'
 import * as echarts from 'echarts'
-import { getQualityCheckList, getQualityCheckStats, exportQualityCheckResults, getActiveKeywords, getQualityCheckChatRecords, updateQualityCheckResult, getQualityCheckModificationLogs } from '@/api/qualitycheck'
+import { getQualityCheckList, getQualityCheckStats, exportQualityCheckResults, getActiveKeywords, getQualityCheckChatRecords, updateQualityCheckResult, getQualityCheckModificationLogs, getQualityCheckDetail } from '@/api/qualitycheck'
 
 // 关键词缓存配置
 const KEYWORDS_CACHE_KEY = 'qc_keywords_cache'
@@ -432,6 +432,7 @@ const chatRecordsVisible = ref(false)
 const chatRecordsLoading = ref(false)
 const chatRecordsData = ref([])
 const chatRecordsTotal = ref(0)
+const chatRecordsTimeRange = ref(null)
 
 // 修改记录弹窗
 const modificationLogsVisible = ref(false)
@@ -649,10 +650,20 @@ function handleTableChange(pag) {
 }
 
 // 详情
-function showDetail(record) {
-  detailData.value = record
+async function showDetail(record) {
   detailVisible.value = true
   editMode.value = false
+  // 调用详情API获取完整数据（包含大字段）
+  try {
+    const res = await getQualityCheckDetail(record.id)
+    if (res.error) {
+      detailData.value = record  // 如果API失败，使用列表数据
+    } else {
+      detailData.value = res
+    }
+  } catch {
+    detailData.value = record  // 如果API失败，使用列表数据
+  }
 }
 
 // 从表格直接打开编辑模式
@@ -717,13 +728,16 @@ async function showChatRecords() {
   chatRecordsVisible.value = true
   chatRecordsLoading.value = true
   chatRecordsData.value = []
+  chatRecordsTimeRange.value = null
   try {
     const res = await getQualityCheckChatRecords(detailData.value.id)
     chatRecordsData.value = res.data || []
     chatRecordsTotal.value = res.total || 0
+    chatRecordsTimeRange.value = res.time_range || null
   } catch {
     chatRecordsData.value = []
     chatRecordsTotal.value = 0
+    chatRecordsTimeRange.value = null
   } finally {
     chatRecordsLoading.value = false
   }

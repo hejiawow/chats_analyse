@@ -2,7 +2,7 @@
 """质检检测结果查询 API"""
 import io
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 from pydantic import BaseModel
 from fastapi import APIRouter, Query, Depends
 from fastapi.responses import StreamingResponse
@@ -11,11 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from app.models.database import async_session
-from app.models.result import QualityCheckResult, QualityCheckModificationLog
+from app.models.result import QualityCheckResult, QualityCheckModificationLog, QualityCheckDetail, QualityCheckTask
 from app.services.dependencies import require_permission, get_current_user
 from app.services.cache import cache_get, cache_set, cache_delete, cache_clear_pattern
-from app.services.hujing_api import get_chat_records
-from config import now_shanghai
+from app.services.hujing_api import get_chat_records, get_chat_records_for_quality_check
+from config import now_shanghai, settings
 
 _STATS_CACHE_TTL = 300  # 统计缓存：5 分钟
 _STATS_CACHE_KEY = "quality_check:stats"
@@ -24,18 +24,25 @@ router = APIRouter()
 
 
 def _build_time_filter(start_time: str | None, end_time: str | None):
-    """构建检测时间范围筛选条件
+    """构建检测时间范围筛选条件（直接通过任务表的时间字段筛选）
 
-    筛选逻辑：检测时间范围与筛选时间范围有交集
-    - check_time_start <= end_time（检测开始时间在筛选结束时间之前）
-    - check_time_end >= start_time（检测结束时间在筛选开始时间之后）
+    筛选逻辑：检测时间范围与筛选时间范围有交集。
+    - task.end_time >= filter_start（任务检测结束时间在筛选开始时间之后）
+    - task.start_time <= filter_end（任务检测起始时间在筛选结束时间之前）
     """
     conditions = []
     if start_time:
-        conditions.append(QualityCheckResult.check_time_end >= start_time)
+        conditions.append(QualityCheckTask.end_time >= start_time)
     if end_time:
-        conditions.append(QualityCheckResult.check_time_start <= end_time)
+        conditions.append(QualityCheckTask.start_time <= end_time)
     return and_(*conditions) if conditions else None
+
+
+def _apply_task_join(stmt):
+    """给查询语句添加 LEFT JOIN quality_check_tasks（用于时间筛选）"""
+    return stmt.outerjoin(
+        QualityCheckTask, QualityCheckResult.task_id == QualityCheckTask.id
+    )
 
 
 def escape_like_pattern(pattern: str) -> str:
@@ -76,49 +83,55 @@ async def query_quality_check_results(
 #     keyword: str | None = Query(None, description="关键词内容（模糊匹配）"),
     start_time: str | None = Query(None, description="开始时间（YYYY-MM-DD HH:mm:ss）"),
     end_time: str | None = Query(None, description="结束时间（YYYY-MM-DD HH:mm:ss）"),
+    task_id: int | None = Query(None, description="关联质检任务ID"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: dict = Depends(require_permission("read:quality_check")),
 ):
     """查询质检检测结果，支持筛选。
 
-    时间筛选：按检测时间范围（check_time_start/check_time_end）筛选，
+    时间筛选：通过关联任务表的 start_time/end_time 筛选，
     筛选逻辑为检测时间范围与筛选时间范围有交集。
     """
     async with async_session() as session:
         stmt = select(QualityCheckResult)
+        # LEFT JOIN 任务表，用于时间筛选和获取任务时间范围
+        stmt = _apply_task_join(stmt)
+
         if user_id:
             stmt = stmt.where(QualityCheckResult.user_id == user_id)
         if friend_id is not None:
             stmt = stmt.where(QualityCheckResult.friend_id == friend_id)
         stmt = _build_risk_keyword_filter(stmt, risk_levels, keywords)
-#         if risk_level:
-#             stmt = stmt.where(QualityCheckResult.risk_level == risk_level)
         if trigger_party:
             stmt = stmt.where(QualityCheckResult.trigger_party == trigger_party)
-#         if keyword:
-#             stmt = stmt.where(QualityCheckResult.detected_keywords.ilike(f"%{keyword}%"))
 
-        # 按检测时间范围筛选
+        # 按任务ID筛选
+        if task_id is not None:
+            stmt = stmt.where(QualityCheckResult.task_id == task_id)
+
+        # 按检测时间范围筛选（通过任务表）
         time_filter = _build_time_filter(start_time, end_time)
         if time_filter is not None:
             stmt = stmt.where(time_filter)
 
         stmt = stmt.order_by(QualityCheckResult.created_at.desc())
 
-        # 总数
-        count_stmt = select(func.count()).select_from(QualityCheckResult)
+        # 总数（需同样的 JOIN）
+        count_stmt = select(func.count()).select_from(
+            QualityCheckResult
+        ).outerjoin(
+            QualityCheckTask, QualityCheckResult.task_id == QualityCheckTask.id
+        )
         if user_id:
             count_stmt = count_stmt.where(QualityCheckResult.user_id == user_id)
         if friend_id is not None:
             count_stmt = count_stmt.where(QualityCheckResult.friend_id == friend_id)
         count_stmt = _build_risk_keyword_filter(count_stmt, risk_levels, keywords)
-#         if risk_level:
-#             count_stmt = count_stmt.where(QualityCheckResult.risk_level == risk_level)
         if trigger_party:
             count_stmt = count_stmt.where(QualityCheckResult.trigger_party == trigger_party)
-#         if keyword:
-#             count_stmt = count_stmt.where(QualityCheckResult.detected_keywords.ilike(f"%{keyword}%"))
+        if task_id is not None:
+            count_stmt = count_stmt.where(QualityCheckResult.task_id == task_id)
         if time_filter is not None:
             count_stmt = count_stmt.where(time_filter)
 
@@ -129,11 +142,29 @@ async def query_quality_check_results(
         result = await session.execute(stmt)
         records = result.scalars().all()
 
+        # 批量获取关联任务的时间范围，填充到返回数据中
+        task_ids = {r.task_id for r in records if r.task_id}
+        task_map = {}
+        if task_ids:
+            task_stmt = select(QualityCheckTask).where(QualityCheckTask.id.in_(task_ids))
+            task_result = await session.execute(task_stmt)
+            task_map = {t.id: t for t in task_result.scalars().all()}
+
+        data = []
+        for r in records:
+            item = r.to_dict()
+            # 从任务表获取检测时间范围
+            task = task_map.get(r.task_id)
+            if task:
+                item["check_time_start"] = task.start_time
+                item["check_time_end"] = task.end_time
+            data.append(item)
+
         return {
             "total": total,
             "page": page,
             "page_size": page_size,
-            "data": [r.to_dict() for r in records],
+            "data": data,
         }
 
 
@@ -149,7 +180,7 @@ async def get_quality_check_stats(
 ):
     """获取质检结果统计：总数、风险分布、关键词频次（支持筛选）
 
-    时间筛选：按检测时间范围（check_time_start/check_time_end）筛选
+    时间筛选：通过任务表检测时间范围筛选，兼容旧数据
     注意：风险等级筛选不影响统计，只影响表格
     """
     # 筛选条件
@@ -169,12 +200,16 @@ async def get_quality_check_stats(
         if cached is not None:
             return cached
 
-    # 构建检测时间范围筛选条件
+    # 构建检测时间范围筛选条件（通过任务表）
     time_filter = _build_time_filter(start_time, end_time)
 
     async with async_session() as session:
-        # 总数统计
-        count_stmt = select(func.count()).select_from(QualityCheckResult)
+        # 总数统计（需 JOIN 任务表用于时间筛选）
+        count_stmt = select(func.count()).select_from(
+            QualityCheckResult
+        ).outerjoin(
+            QualityCheckTask, QualityCheckResult.task_id == QualityCheckTask.id
+        )
         if user_id_filter:
             count_stmt = count_stmt.where(QualityCheckResult.user_id == user_id_filter)
         if friend_id is not None:
@@ -195,6 +230,11 @@ async def get_quality_check_stats(
         risk_stmt = select(
             effective_risk_level.label("risk_level"),
             func.count().label("count")
+        ).select_from(
+            QualityCheckResult
+        ).outerjoin(
+            QualityCheckTask, QualityCheckResult.task_id == QualityCheckTask.id
+#         ).group_by(QualityCheckResult.risk_level)
         ).group_by(effective_risk_level)
         if user_id_filter:
             risk_stmt = risk_stmt.where(QualityCheckResult.user_id == user_id_filter)
@@ -210,7 +250,11 @@ async def get_quality_check_stats(
         risk_distribution = {row.risk_level or "none": row.count for row in risk_result}
 
         # 关键词频次统计
-        keyword_stmt = select(QualityCheckResult.detected_keywords)
+        keyword_stmt = select(QualityCheckResult.detected_keywords).select_from(
+            QualityCheckResult
+        ).outerjoin(
+            QualityCheckTask, QualityCheckResult.task_id == QualityCheckTask.id
+        )
         if user_id_filter:
             keyword_stmt = keyword_stmt.where(QualityCheckResult.user_id == user_id_filter)
         if friend_id is not None:
@@ -264,24 +308,22 @@ async def export_quality_check_results(
 ):
     """导出质检结果为 CSV 文件（带数量限制）
 
-    时间筛选：按检测时间范围（check_time_start/check_time_end）筛选
+    时间筛选：通过任务表检测时间范围筛选，兼容旧数据
     """
-    # 构建检测时间范围筛选条件
+    # 构建检测时间范围筛选条件（通过任务表）
     time_filter = _build_time_filter(start_time, end_time)
 
     async with async_session() as session:
         stmt = select(QualityCheckResult)
+        # LEFT JOIN 任务表，用于时间筛选和获取任务时间范围
+        stmt = _apply_task_join(stmt)
         if user_id:
             stmt = stmt.where(QualityCheckResult.user_id == user_id)
         if friend_id is not None:
             stmt = stmt.where(QualityCheckResult.friend_id == friend_id)
         stmt = _build_risk_keyword_filter(stmt, risk_levels, keywords)
-#         if risk_level:
-#             stmt = stmt.where(QualityCheckResult.risk_level == risk_level)
         if trigger_party:
             stmt = stmt.where(QualityCheckResult.trigger_party == trigger_party)
-#         if keyword:
-#             stmt = stmt.where(QualityCheckResult.detected_keywords.ilike(f"%{keyword}%"))
         if time_filter is not None:
             stmt = stmt.where(time_filter)
         stmt = stmt.order_by(QualityCheckResult.created_at.desc())
@@ -289,6 +331,14 @@ async def export_quality_check_results(
 
         result = await session.execute(stmt)
         records = result.scalars().all()
+
+        # 批量获取关联任务的时间范围
+        task_ids = {r.task_id for r in records if r.task_id}
+        task_map = {}
+        if task_ids:
+            task_stmt = select(QualityCheckTask).where(QualityCheckTask.id.in_(task_ids))
+            task_result = await session.execute(task_stmt)
+            task_map = {t.id: t for t in task_result.scalars().all()}
 
     # 构建 CSV
     output = io.StringIO()
@@ -299,11 +349,14 @@ async def export_quality_check_results(
         "ID", "销售ID", "好友ID", "好友姓名", "好友备注", "好友别名", "绑定手机号", "备注手机号",
         "检测时间范围", "聊天记录数",
         "关键词检测", "检测关键词", "风险等级", "触发方", "风险类别",
-        "风险描述", "建议措施", "创建时间"
+        "风险描述", "创建时间"
     ])
 
     # 数据行
     for r in records:
+        task = task_map.get(r.task_id)
+        time_start = task.start_time if task else ""
+        time_end = task.end_time if task else ""
         writer.writerow([
             r.id,
             r.user_id,
@@ -313,7 +366,7 @@ async def export_quality_check_results(
             r.alias or "",
             r.phone or "",
             r.remark_phone or "",
-            f"{r.check_time_start} ~ {r.check_time_end}",
+            f"{time_start} ~ {time_end}",
             r.chat_record_count,
             r.keyword_detected,
             r.detected_keywords or "",
@@ -321,7 +374,6 @@ async def export_quality_check_results(
             r.trigger_party or "",
             r.risk_category or "",
             r.risk_description or "",
-            r.suggested_action or "",
             r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else "",
         ])
 
@@ -334,12 +386,91 @@ async def export_quality_check_results(
     )
 
 
+# === 质检任务查询 API ===
+
+@router.get("/quality-check/tasks")
+async def query_quality_check_tasks(
+    status: str | None = Query(None, description="任务状态：pending/running/completed/cancelled/error/no_pairs/no_matches"),
+    start_time: str | None = Query(None, description="任务发起时间起（YYYY-MM-DD HH:mm:ss）"),
+    end_time: str | None = Query(None, description="任务发起时间止（YYYY-MM-DD HH:mm:ss）"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: dict = Depends(require_permission("read:quality_check")),
+):
+    """查询质检任务列表，支持分页和状态/时间筛选"""
+    async with async_session() as session:
+        stmt = select(QualityCheckTask)
+        count_stmt = select(func.count()).select_from(QualityCheckTask)
+
+        if status:
+            stmt = stmt.where(QualityCheckTask.status == status)
+            count_stmt = count_stmt.where(QualityCheckTask.status == status)
+        if start_time:
+            stmt = stmt.where(QualityCheckTask.created_at >= start_time)
+            count_stmt = count_stmt.where(QualityCheckTask.created_at >= start_time)
+        if end_time:
+            stmt = stmt.where(QualityCheckTask.created_at <= end_time)
+            count_stmt = count_stmt.where(QualityCheckTask.created_at <= end_time)
+
+        total = await session.scalar(count_stmt)
+
+        stmt = stmt.order_by(QualityCheckTask.created_at.desc())
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+        result = await session.execute(stmt)
+        tasks = result.scalars().all()
+
+        return {
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "data": [t.to_dict() for t in tasks],
+        }
+
+
+@router.get("/quality-check/tasks/{task_id}")
+async def get_quality_check_task_detail(
+    task_id: int,
+    current_user: dict = Depends(require_permission("read:quality_check")),
+):
+    """获取单个质检任务详情（含统计信息）"""
+    async with async_session() as session:
+        stmt = select(QualityCheckTask).where(QualityCheckTask.id == task_id)
+        result = await session.execute(stmt)
+        task = result.scalar_one_or_none()
+
+        if not task:
+            return {"error": "任务不存在"}
+
+        # 查询该任务下的质检结果统计
+        result_count_stmt = select(func.count()).select_from(QualityCheckResult).where(
+            QualityCheckResult.task_id == task_id
+        )
+        result_count = await session.scalar(result_count_stmt)
+
+        risk_dist_stmt = select(
+            QualityCheckResult.risk_level, func.count().label("count")
+        ).where(QualityCheckResult.task_id == task_id).group_by(QualityCheckResult.risk_level)
+        risk_result = await session.execute(risk_dist_stmt)
+        risk_distribution = {row.risk_level or "none": row.count for row in risk_result}
+
+        task_dict = task.to_dict()
+        task_dict["result_count"] = result_count
+        task_dict["risk_distribution"] = risk_distribution
+
+        return task_dict
+
+
 @router.get("/quality-check/{result_id}/chat-records")
 async def get_quality_check_chat_records(
     result_id: int,
     current_user: dict = Depends(require_permission("read:quality_check")),
 ):
-    """获取质检结果对应的全部聊天记录"""
+    """获取质检结果对应的全部聊天记录
+
+    使用与分析时相同的查询逻辑（get_chat_records_for_quality_check），
+    即 end_time 往前推 QUALITY_CHECK_CHAT_DAYS 天，并截取最新 QUALITY_CHECK_MAX_CHAT_RECORDS 条，
+    确保展示的聊天记录与 AI 分析时完全一致。
+    """
     async with async_session() as session:
         stmt = select(QualityCheckResult).where(QualityCheckResult.id == result_id)
         result = await session.execute(stmt)
@@ -348,25 +479,35 @@ async def get_quality_check_chat_records(
         if not record:
             return {"error": "记录不存在"}
 
-        # 打印调试信息
-        print(f"[DEBUG] get_chat_records params: user_id={record.user_id}, friend_id={record.friend_id}, start={record.check_time_start}, end={record.check_time_end}")
+        # 从任务表获取 end_time
+        task_end_time = None
+        if record.task_id:
+            task_stmt = select(QualityCheckTask).where(QualityCheckTask.id == record.task_id)
+            task_result = await session.execute(task_stmt)
+            task = task_result.scalar_one_or_none()
+            if task:
+                task_end_time = task.end_time
 
-        # 获取聊天记录
-        chat_records = get_chat_records(
+        # 使用与分析时相同的查询函数：end_time 往前推 QUALITY_CHECK_CHAT_DAYS 天 + 条数限制
+        chat_records = get_chat_records_for_quality_check(
             user_id=record.user_id,
             friend_id=record.friend_id,
-            start_time=record.check_time_start or "2000-01-01 00:00:00",
-            end_time=record.check_time_end or "2099-12-31 23:59:59",
+            end_time=task_end_time or "2099-12-31 23:59:59",
         )
 
-        print(f"[DEBUG] get_chat_records returned: {len(chat_records)} records")
+        # 计算实际查询时间范围（与分析时一致）
+        if task_end_time:
+            end_dt = datetime.strptime(task_end_time, "%Y-%m-%d %H:%M:%S")
+            actual_start = (end_dt - timedelta(days=settings.QUALITY_CHECK_CHAT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            actual_start = None
 
         return {
             "total": len(chat_records),
             "data": chat_records,
             "time_range": {
-                "start": record.check_time_start,
-                "end": record.check_time_end,
+                "start": actual_start,
+                "end": task_end_time,
             },
         }
 
@@ -376,8 +517,9 @@ async def get_quality_check_detail(
     result_id: int,
     current_user: dict = Depends(require_permission("read:quality_check")),
 ):
-    """获取单条质检检测结果"""
+    """获取单条质检检测结果（包含详情表的大字段）"""
     async with async_session() as session:
+        # 查询主表
         stmt = select(QualityCheckResult).where(QualityCheckResult.id == result_id)
         result = await session.execute(stmt)
         record = result.scalar_one_or_none()
@@ -385,7 +527,32 @@ async def get_quality_check_detail(
         if not record:
             return {"error": "记录不存在"}
 
-        return record.to_dict()
+        # 关联查询详情表（大字段）
+        detail_stmt = select(QualityCheckDetail).where(
+            QualityCheckDetail.result_id == result_id
+        )
+        detail_result = await session.execute(detail_stmt)
+        detail = detail_result.scalar_one_or_none()
+
+        # 合并返回
+        data = record.to_dict()
+
+        # 从任务表获取检测时间范围（优先任务表，兑底旧字段）
+        if record.task_id:
+            task_stmt = select(QualityCheckTask).where(QualityCheckTask.id == record.task_id)
+            task_result = await session.execute(task_stmt)
+            task = task_result.scalar_one_or_none()
+            if task:
+                data["check_time_start"] = task.start_time
+                data["check_time_end"] = task.end_time
+
+        if detail:
+            data["keyword_matches"] = detail.keyword_matches
+            data["key_evidence"] = detail.key_evidence
+            data["suggested_action"] = detail.suggested_action
+            data["raw_response"] = detail.raw_response
+
+        return data
 
 
 def invalidate_quality_check_stats_cache(user_id: str = None) -> None:
