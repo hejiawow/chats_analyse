@@ -53,11 +53,6 @@
         <a-checkbox-group v-model:value="filters.risk_levels" :options="riskLevelOptions" />
       </a-form-item>
 <!--             <a-form-item> -->
-      <a-form-item label="关键词">
-        <a-select v-model:value="filters.keyword" placeholder="全部" style="width: 120px" allowClear showSearch>
-          <a-select-option v-for="kw in keywordOptions" :key="kw" :value="kw">{{ kw }}</a-select-option>
-        </a-select>
-      </a-form-item>
       <a-form-item label="触发方">
         <a-select v-model:value="filters.trigger_party" placeholder="全部" style="width: 120px" allowClear>
           <a-select-option value="sales">销售触发</a-select-option>
@@ -453,6 +448,7 @@ function formatDateTime(isoString) {
   } catch {
     return isoString
   }
+}
 // 触发方颜色映射
 const getTriggerPartyColor = (trigger_party) => {
   const colorMap = {
