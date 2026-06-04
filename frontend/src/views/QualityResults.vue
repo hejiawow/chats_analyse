@@ -33,64 +33,73 @@
     </a-collapse>
 
     <!-- 筛选栏 -->
-    <a-form layout="inline" :model="filters" class="qr-filter-bar">
-      <a-form-item label="聊天时间范围">
-        <a-range-picker
-          v-model:value="filters.timeRange"
-          :show-time="{ format: 'HH:mm:ss' }"
-          format="YYYY-MM-DD HH:mm:ss"
-          :placeholder="['开始时间', '结束时间']"
-          style="width: 340px"
-        />
-      </a-form-item>
-      <a-form-item label="销售ID">
-        <a-input v-model:value="filters.user_id" placeholder="销售ID" style="width: 140px" />
-      </a-form-item>
-      <a-form-item label="好友ID">
-        <a-input v-model:value="filters.friend_id" placeholder="好友ID" style="width: 140px" />
-      </a-form-item>
-      <a-form-item label="风险等级">
-        <a-checkbox-group v-model:value="filters.risk_levels" :options="riskLevelOptions" />
-      </a-form-item>
-<!--             <a-form-item> -->
-      <a-form-item label="触发方">
-        <a-select v-model:value="filters.trigger_party" placeholder="全部" style="width: 120px" allowClear>
-          <a-select-option value="sales">销售触发</a-select-option>
-          <a-select-option value="customer">客户触发</a-select-option>
-          <a-select-option value="both">双方触发</a-select-option>
-        </a-select>
-      </a-form-item>
-      <a-form-item>
-        <a-button type="primary" @click="handleSearch">查询</a-button>
-        <a-button style="margin-left: 8px" @click="handleReset">重置</a-button>
-        <a-button style="margin-left: 8px" @click="handleExport">导出 CSV</a-button>
-      </a-form-item>
+    <a-form :model="filters" class="qr-filter-bar">
+      <div class="qr-filter-row">
+        <a-form-item label="时间范围">
+          <a-range-picker
+            v-model:value="filters.timeRange"
+            :show-time="{ format: 'HH:mm:ss' }"
+            format="YYYY-MM-DD HH:mm:ss"
+            :placeholder="['开始', '结束']"
+            style="width: 280px"
+          />
+        </a-form-item>
+        <a-form-item label="销售ID">
+          <a-input v-model:value="filters.user_id" placeholder="请输入" style="width: 120px" allowClear />
+        </a-form-item>
+        <a-form-item label="好友ID">
+          <a-input v-model:value="filters.friend_id" placeholder="请输入" style="width: 120px" allowClear />
+        </a-form-item>
+        <a-form-item label="触发方">
+          <a-select v-model:value="filters.trigger_party" placeholder="全部" style="width: 100px" allowClear>
+            <a-select-option value="sales">销售</a-select-option>
+            <a-select-option value="customer">客户</a-select-option>
+            <a-select-option value="both">双方</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item class="qr-filter-buttons">
+          <a-button type="primary" @click="handleSearch">查询</a-button>
+          <a-button @click="handleReset">重置</a-button>
+          <a-button @click="handleExport">导出 CSV</a-button>
+        </a-form-item>
+      </div>
+      <div class="qr-filter-row">
+        <a-form-item label="风险等级">
+          <a-select
+            v-model:value="filters.risk_levels"
+            mode="multiple"
+            placeholder="请选择"
+            style="width: 180px"
+            allowClear
+            :maxTagCount="1"
+            :maxTagPlaceholder="omittedValues => `+${omittedValues.length}个`"
+          >
+            <a-select-option value="high">高风险</a-select-option>
+            <a-select-option value="medium">中风险</a-select-option>
+            <a-select-option value="low">低风险</a-select-option>
+            <a-select-option value="none">无风险</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="关键词">
+          <a-select
+            v-model:value="filters.keywords"
+            mode="multiple"
+            placeholder="请选择"
+            style="width: 180px"
+            allowClear
+            :maxTagCount="1"
+            :maxTagPlaceholder="omittedValues => `+${omittedValues.length}个`"
+            showSearch
+            :filterOption="filterKeywordOption"
+          >
+            <a-select-opt-group v-for="(keywords, category) in keywordOptions" :key="category">
+              <template #label>{{ categoryNames[category] || category }}</template>
+              <a-select-option v-for="kw in keywords" :key="kw" :value="kw">{{ kw }}</a-select-option>
+            </a-select-opt-group>
+          </a-select>
+        </a-form-item>
+      </div>
     </a-form>
-
-    <!-- 关键词筛选折叠面板 -->
-    <a-collapse v-model:activeKey="keywordsCollapseActive" class="qr-keywords-collapse">
-      <a-collapse-panel key="keywords" header="关键词筛选（点击展开）">
-        <a-checkbox-group v-model:value="filters.keywords">
-          <div class="qr-keywords-table-layout">
-            <!-- 类别标题行 -->
-            <div class="qr-keywords-header-row">
-              <div v-for="(keywords, category) in keywordOptions" :key="category" class="qr-keywords-header-cell">
-                {{ categoryNames[category] || category }}
-              </div>
-            </div>
-
-            <!-- 关键词内容行 -->
-            <div class="qr-keywords-content-row">
-              <div v-for="(keywords, category) in keywordOptions" :key="category" class="qr-keywords-content-cell">
-                <a-checkbox v-for="kw in keywords" :key="kw" :value="kw" class="qr-keyword-checkbox-vertical">
-                  {{ kw }}
-                </a-checkbox>
-              </div>
-            </div>
-          </div>
-        </a-checkbox-group>
-      </a-collapse-panel>
-    </a-collapse>
 
     <!-- 结果表格 -->
     <a-table
@@ -371,17 +380,10 @@ const filters = reactive({
   timeRange: null
 })
 
-// 关键词折叠面板状态（默认折叠）
-const keywordsCollapseActive = ref([])
-
-// 风险等级选项配置
-const riskLevelOptions = [
-  { label: '高风险', value: 'high' },
-  { label: '中风险', value: 'medium' },
-  { label: '低风险', value: 'low' },
-  { label: '无风险', value: 'none' }
-]
-// const filters = reactive({ user_id: '', friend_id: '', risk_level: null, keyword: '', trigger_party: undefined, timeRange: null })
+// 关键词下拉框搜索过滤函数
+function filterKeywordOption(input, option) {
+  return option.value.toLowerCase().includes(input.toLowerCase())
+}
 
 // 表格
 const data = ref([])
@@ -631,11 +633,8 @@ function handleReset() {
   filters.friend_id = ''
   filters.risk_levels = []
   filters.keywords = []
-//   filters.risk_level = null
-//   filters.keyword = ''
   filters.trigger_party = undefined
   filters.timeRange = null
-  keywordsCollapseActive.value = []  // 折叠关键词面板
   pagination.current = 1
   loadData()
   loadStats()
@@ -887,10 +886,30 @@ onMounted(() => {
 /* 筛选栏 */
 .qr-filter-bar {
   margin-bottom: 5px;
-  padding: 16px 20px;
+  padding: 12px 20px;
   background: #fff;
   border-radius: 8px;
   border: 1px solid #e2e8f0;
+}
+
+.qr-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.qr-filter-row .ant-form-item {
+  margin-bottom: 8px;
+  margin-right: 0;
+}
+
+.qr-filter-buttons {
+  margin-left: auto;
+}
+
+.qr-filter-buttons .ant-btn {
+  margin-left: 8px;
 }
 
 /* 聊天记录弹窗样式 - 微信风格 */
@@ -990,76 +1009,6 @@ onMounted(() => {
 .chat-message.is-self .chat-bubble::before {
   right: -10px;
   border-left-color: #95ec69;
-}
-
-/* 关键词筛选折叠面板 */
-.qr-keywords-collapse {
-  margin-bottom: 16px;
-  background: #fff;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
-}
-
-/* 关键词表格布局 */
-.qr-keywords-table-layout {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* 类别标题行 */
-.qr-keywords-header-row {
-  display: flex;
-  gap: 0;
-  border-bottom: 2px solid #e2e8f0;
-}
-
-.qr-keywords-header-cell {
-  flex: 1;
-  padding: 8px 12px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #475569;
-  text-align: center;
-  background: #f8fafc;
-}
-
-/* 关键词内容行 */
-.qr-keywords-content-row {
-  display: flex;
-  gap: 0;
-}
-
-.qr-keywords-content-cell {
-  flex: 1;
-  padding: 8px 12px;
-  min-width: 120px;
-}
-
-/* 关键词checkbox垂直排列并确保对齐 */
-.qr-keyword-checkbox-vertical {
-  display: flex;
-  align-items: center;
-  margin-bottom: 6px;
-}
-
-.qr-keyword-checkbox-vertical:last-child {
-  margin-bottom: 0;
-}
-
-/* 确保Ant Design Vue的checkbox内容对齐 */
-.qr-keywords-content-cell .ant-checkbox-wrapper {
-  display: flex;
-  align-items: center;
-}
-
-.qr-keywords-content-cell .ant-checkbox {
-  margin-right: 8px;
-}
-
-.qr-keywords-content-cell .ant-checkbox + span {
-  padding-right: 0;
-  line-height: 1.5;
 }
 
 /* 风险描述/建议措施预览样式：限制高度，超长省略 */
