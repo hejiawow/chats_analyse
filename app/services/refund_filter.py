@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models.database import sync_engine
 from app.models.result import RefundWhitelistPattern
-from app.services.hujing_api import get_chat_records
+from app.services.hujing_api import get_chat_records, get_friends_batch
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +76,41 @@ def _normalize_messages(messages: list) -> list:
         }
         normalized.append(item)
     return normalized
+
+
+def _has_customer_message(records: list) -> bool:
+    """判断聊天记录中是否包含客户消息"""
+    return any(record.get("author") == "left" for record in records)
+
+
+def _should_filter_ahu_friend(friend_name: str | None) -> bool:
+    """判断好友名是否命中阿虎小号过滤规则"""
+    if not friend_name:
+        return False
+    return "阿虎" in friend_name.strip()
+
+
+def _build_friend_name_index(matched_pairs: list[tuple[str, int]]) -> dict[tuple[str, int], str]:
+    """批量构建 (user_id, friend_id) -> friend_name 映射"""
+    user_ids = sorted({user_id for user_id, _ in matched_pairs if user_id})
+    if not user_ids:
+        return {}
+
+    friends_map = get_friends_batch(user_ids)
+    friend_name_index: dict[tuple[str, int], str] = {}
+
+    for user_id, friends in friends_map.items():
+        for friend in friends or []:
+            friend_id = friend.get("friendId")
+            try:
+                friend_id_int = int(friend_id)
+            except (ValueError, TypeError):
+                continue
+
+            friend_name = friend.get("nick") or friend.get("remark") or ""
+            friend_name_index[(user_id, friend_id_int)] = friend_name
+
+    return friend_name_index
 
 
 def check_protocol_refund_trigger(
@@ -166,15 +201,13 @@ def filter_matched_pairs(
     if not matched_pairs:
         return matched_pairs
 
-    # 获取协议话术白名单
+    # 获取协议话术白名单。新增的入口级过滤不依赖白名单，因此白名单为空时不能提前返回。
     whitelist_patterns = get_whitelist_patterns()
 
     if not whitelist_patterns:
         if log_func and batch_task_id:
-            log_func(batch_task_id, "[过滤] 协议话术白名单为空，跳过过滤步骤", "info")
-        return matched_pairs
-
-    if log_func and batch_task_id:
+            log_func(batch_task_id, "[过滤] 协议话术白名单为空，跳过协议退费过滤", "info")
+    elif log_func and batch_task_id:
         log_func(batch_task_id, f"[过滤] 已加载 {len(whitelist_patterns)} 个协议话术白名单", "info")
 
     filtered_pairs = []
@@ -186,6 +219,13 @@ def filter_matched_pairs(
             log_func(batch_task_id, f"[过滤] 使用内存匹配模式（{len(all_messages)} 条消息，零 API 调用）", "info")
 
         pair_index = _build_pair_index(all_messages)
+        try:
+            friend_name_index = _build_friend_name_index(matched_pairs)
+        except Exception as e:
+            logger.error(f"[过滤] 获取好友信息失败: {e}")
+            if log_func and batch_task_id:
+                log_func(batch_task_id, f"[过滤错误] 获取好友信息失败: {str(e)}", "error")
+            friend_name_index = {}
 
         for user_id, friend_id in matched_pairs:
             records = pair_index.get((user_id, friend_id), [])
@@ -193,9 +233,22 @@ def filter_matched_pairs(
                 filtered_pairs.append((user_id, friend_id))
                 continue
 
+            if not _has_customer_message(records):
+                filtered_count += 1
+                if log_func and batch_task_id:
+                    log_func(batch_task_id, f"[过滤] 销售:{user_id} 好友:{friend_id} 无客户消息，已过滤", "info")
+                continue
+
+            friend_name = friend_name_index.get((user_id, friend_id))
+            if _should_filter_ahu_friend(friend_name):
+                filtered_count += 1
+                if log_func and batch_task_id:
+                    log_func(batch_task_id, f"[过滤] 销售:{user_id} 好友:{friend_id} 好友名包含阿虎，已过滤", "info")
+                continue
+
             normalized = _normalize_messages(records)
 
-            if check_protocol_refund_trigger(user_id, friend_id, normalized, whitelist_patterns):
+            if whitelist_patterns and check_protocol_refund_trigger(user_id, friend_id, normalized, whitelist_patterns):
                 filtered_count += 1
                 if log_func and batch_task_id:
                     log_func(batch_task_id, f"[过滤] 销售:{user_id} 好友:{friend_id} 为协议触发退费，已过滤", "info")
@@ -215,7 +268,7 @@ def filter_matched_pairs(
                     filtered_pairs.append((user_id, friend_id))
                     continue
 
-                if check_protocol_refund_trigger(user_id, friend_id, chat_records, whitelist_patterns):
+                if whitelist_patterns and check_protocol_refund_trigger(user_id, friend_id, chat_records, whitelist_patterns):
                     filtered_count += 1
                     if log_func and batch_task_id:
                         log_func(batch_task_id, f"[过滤] 销售:{user_id} 好友:{friend_id} 为协议触发退费，已过滤", "info")
@@ -229,6 +282,6 @@ def filter_matched_pairs(
                 filtered_pairs.append((user_id, friend_id))
 
     if log_func and batch_task_id and filtered_count > 0:
-        log_func(batch_task_id, f"[过滤] 共过滤掉 {filtered_count} 个协议触发退费的聊天对", "info")
+        log_func(batch_task_id, f"[过滤] 共过滤掉 {filtered_count} 个聊天对", "info")
 
     return filtered_pairs
