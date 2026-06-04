@@ -11,7 +11,7 @@ from app.services.hujing_api import get_chat_pairs, get_chat_records, get_all_ch
 from app.agents.quality_check import quality_check_agent
 from app.models.database import sync_engine
 from app.models.result import QualityCheckResult, QualityCheckDetail, QualityCheckTask
-from config import settings
+from config import settings, now_shanghai
 from app.api.quality_check_query import invalidate_quality_check_stats_cache
 from app.services.cache import cache_clear_pattern
 from app.services.log_service import log as _log, LOGS_KEY_PREFIX
@@ -276,7 +276,7 @@ def run_single_batch_check(self, batch_task_id: str, db_task_id: int, user_id: s
                     risk_description=result.get("risk_description"),
                     status=result.get("status", "success"),
                     task_id=db_task_id,
-                    created_at=datetime.now(),
+                    created_at=now_shanghai(),
                 )
                 session.add(record)
                 session.flush()  # 获取 record.id
@@ -505,7 +505,7 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, db_task_id: int,
                     risk_description=result.get("risk_description"),
                     status=result.get("status", "success"),
                     task_id=db_task_id,
-                    created_at=datetime.now(),
+                    created_at=now_shanghai(),
                 )
                 session.add(record)
                 session.flush()  # 获取 record.id

@@ -15,6 +15,7 @@ from app.models.result import QualityCheckResult, QualityCheckModificationLog, Q
 from app.services.dependencies import require_permission, get_current_user
 from app.services.cache import cache_get, cache_set, cache_delete, cache_clear_pattern
 from app.services.hujing_api import get_chat_records, get_chat_records_for_quality_check
+from config import now_shanghai
 
 _STATS_CACHE_TTL = 300  # 统计缓存：5 分钟
 _STATS_CACHE_KEY = "quality_check:stats"
@@ -50,9 +51,18 @@ def escape_like_pattern(pattern: str) -> str:
 
 
 def _build_risk_keyword_filter(stmt, risk_levels: List[str] | None, keywords: List[str] | None):
-    """Build risk level and keyword filter conditions"""
+    """Build risk level and keyword filter conditions
+
+    风险等级筛选逻辑：使用"有效风险等级" = COALESCE(modified_risk_level, risk_level)
+    即优先使用人工修正后的等级，若无修正则使用原始等级
+    """
     if risk_levels:
-        stmt = stmt.where(QualityCheckResult.risk_level.in_(risk_levels))
+        # 使用 COALESCE 函数：modified_risk_level 优先，否则使用 risk_level
+        effective_risk_level = func.coalesce(
+            QualityCheckResult.modified_risk_level,
+            QualityCheckResult.risk_level
+        )
+        stmt = stmt.where(effective_risk_level.in_(risk_levels))
     if keywords:
         keyword_conditions = [
             QualityCheckResult.detected_keywords.ilike(f"%{escape_like_pattern(kw)}%", escape="\\")
@@ -212,15 +222,20 @@ async def get_quality_check_stats(
             count_stmt = count_stmt.where(time_filter)
         total = await session.scalar(count_stmt)
 
-        # 风险等级分布
+        # 风险等级分布（使用有效风险等级 = COALESCE(modified_risk_level, risk_level))
+        effective_risk_level = func.coalesce(
+            QualityCheckResult.modified_risk_level,
+            QualityCheckResult.risk_level
+        )
         risk_stmt = select(
-            QualityCheckResult.risk_level,
+            effective_risk_level.label("risk_level"),
             func.count().label("count")
         ).select_from(
             QualityCheckResult
         ).outerjoin(
             QualityCheckTask, QualityCheckResult.task_id == QualityCheckTask.id
-        ).group_by(QualityCheckResult.risk_level)
+#         ).group_by(QualityCheckResult.risk_level)
+        ).group_by(effective_risk_level)
         if user_id_filter:
             risk_stmt = risk_stmt.where(QualityCheckResult.user_id == user_id_filter)
         if friend_id is not None:
@@ -564,7 +579,13 @@ async def update_quality_check_result(
     request: QualityCheckUpdateRequest,
     current_user: dict = Depends(require_permission("update:quality_check")),
 ):
-    """修改质检结果的风险等级和备注（带审计日志）"""
+    """修改质检结果的风险等级和备注（带审计日志）
+
+    逻辑说明：
+    - 只有当风险等级实际改变时，才更新 modified_risk_level
+    - 如果风险等级改回原始值（和 risk_level 相同），则清空 modified_risk_level
+    - 备注 modification 不影响 modified_risk_level
+    """
     async with async_session() as session:
         # 1. 获取原记录
         stmt = select(QualityCheckResult).where(QualityCheckResult.id == result_id)
@@ -574,44 +595,60 @@ async def update_quality_check_result(
         if not record:
             return {"error": "记录不存在"}
 
-        # 2. 检查是否有实际修改
-        has_change = False
-        old_risk_level = record.modified_risk_level or record.risk_level
+        # 2. 获取旧值
+        old_effective_risk_level = record.modified_risk_level or record.risk_level  # 当前生效的风险等级
+        old_original_risk_level = record.risk_level  # AI 原始检测的风险等级
         old_remark = record.remark or ""
 
-        new_risk_level = request.risk_level if request.risk_level is not None else old_risk_level
+        # 3. 确定新值
+        new_risk_level = request.risk_level if request.risk_level is not None else old_effective_risk_level
         new_remark = request.remark if request.remark is not None else old_remark
 
-        if new_risk_level != old_risk_level or new_remark != old_remark:
-            has_change = True
+        # 4. 检查是否有实际修改
+        risk_level_changed = new_risk_level != old_effective_risk_level
+        remark_changed = new_remark != old_remark
 
-        if not has_change:
+        if not risk_level_changed and not remark_changed:
             return {"message": "无实际修改", "data": record.to_dict()}
 
-        # 3. 写入审计日志
+        # 5. 确定 modified_risk_level 的最终值
+        # 只有风险等级实际改变时才更新 modified_risk_level
+        if risk_level_changed:
+            # 风险等级发生了改变，记录到 modified_risk_level
+            final_modified_risk_level = new_risk_level
+        else:
+            # 风险等级未改变，保持原样
+            final_modified_risk_level = record.modified_risk_level
+
+        # 6. 写入审计日志
         log = QualityCheckModificationLog(
             result_id=result_id,
             user_id=str(current_user["user_id"]),
             user_name=current_user["username"],
-            old_risk_level=old_risk_level,
+            old_risk_level=old_effective_risk_level,
             new_risk_level=new_risk_level,
             old_remark=old_remark,
             new_remark=new_remark,
-            modified_at=datetime.now(),
+            modified_at=now_shanghai(),
         )
         session.add(log)
 
-        # 4. 更新主记录
+        # 7. 更新主记录
         record.remark = new_remark
-        record.modified_risk_level = new_risk_level
-        record.modified_at = datetime.now()
+        record.modified_risk_level = final_modified_risk_level
+        record.modified_at = now_shanghai()
         record.modified_by = str(current_user["user_id"])
         record.modified_by_name = current_user["username"]
 
         await session.commit()
 
-        # 5. 清除统计缓存
+        # 8. 清除统计缓存
         invalidate_quality_check_stats_cache()
+
+        return {
+            "message": "修改成功",
+            "data": record.to_dict(),
+        }
 
         return {
             "message": "修改成功",
