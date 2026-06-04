@@ -12,7 +12,7 @@ from app.agents.registry import AgentRegistry
 import app.agents  # noqa: F401 - 触发所有 Agent 的注册
 from app.models.result import ReferralResult, CaseExtractionResult, SalesJourneyResult, FollowUpComplianceResult, QualityCheckResult
 from app.models.database import sync_engine
-from config import settings
+from config import settings, now_shanghai
 from app.services.log_service import log as _log, get_task_logs, mark_task_done, is_task_done, clear_task_logs
 
 # 使用 Redis 存储日志和任务状态（跨进程共享）
@@ -32,7 +32,7 @@ def _save_referral(user_id, user_wx_id, friend_id, friend_wx_id, friend_nick,
     return ReferralResult(
         user_id=user_id, user_wx_id=user_wx_id,
         friend_id=friend_id, friend_wx_id=friend_wx_id, friend_nick=friend_nick,
-        status=status, result=result, error_msg=error_msg, created_at=datetime.now(),
+        status=status, result=result, error_msg=error_msg, created_at=now_shanghai(),
     )
 
 
@@ -91,7 +91,7 @@ def _save_cases(user_id, user_wx_id, friend_id, friend_wx_id, friend_nick,
                 **common,
                 raw_response=raw_result.get("raw_response", ""),
                 status="success",
-                created_at=datetime.now(),
+                created_at=now_shanghai(),
             )
         else:
             # 默认按销售话术处理
@@ -106,7 +106,7 @@ def _save_cases(user_id, user_wx_id, friend_id, friend_wx_id, friend_nick,
                 **common,
                 raw_response=raw_result.get("raw_response", ""),
                 status="success",
-                created_at=datetime.now(),
+                created_at=now_shanghai(),
             )
 
         records.append(record)
@@ -254,7 +254,7 @@ def run_analysis(self, task_id: str, user_id: str, friend_id: int,
                             status="no_cases",
                             raw_response=result.get("raw_response", ""),
                             error_msg="该聊天记录中无显著优秀案例",
-                            created_at=datetime.now(),
+                            created_at=now_shanghai(),
                         )
                         session.add(record)
                         _log(task_id, f"  [{agent_name}] 未发现优秀案例", "warning")
@@ -278,7 +278,7 @@ def run_analysis(self, task_id: str, user_id: str, friend_id: int,
                             friend_nick=friend_nick,
                             status="no_chat",
                             error_msg="无聊天记录",
-                            created_at=datetime.now(),
+                            created_at=now_shanghai(),
                         )
                     else:
                         basic = result.get("module1_basic", {})
@@ -295,7 +295,7 @@ def run_analysis(self, task_id: str, user_id: str, friend_id: int,
                             sales_style=basic.get("sales_style", ""),
                             raw_response=result.get("raw_response", ""),
                             status="success",
-                            created_at=datetime.now(),
+                            created_at=now_shanghai(),
                         )
                     session.add(record)
                     saved += 1
@@ -310,7 +310,7 @@ def run_analysis(self, task_id: str, user_id: str, friend_id: int,
                             status="no_chat",
                             is_compliant="non_compliant",
                             error_msg="无聊天记录",
-                            created_at=datetime.now(),
+                            created_at=now_shanghai(),
                         )
                     else:
                         # 从所有窗口中计算最低跟进次数
@@ -330,7 +330,7 @@ def run_analysis(self, task_id: str, user_id: str, friend_id: int,
                             min_window_count=min_count,
                             violation_windows=result.get("violation_windows", []),
                             status="success",
-                            created_at=datetime.now(),
+                            created_at=now_shanghai(),
                         )
                     session.add(record)
                     saved += 1
@@ -357,7 +357,7 @@ def run_analysis(self, task_id: str, user_id: str, friend_id: int,
                         key_evidence=result.get("key_evidence"),
                         raw_response=result.get("raw_response"),
                         status=result.get("status", "success"),
-                        created_at=datetime.now(),
+                        created_at=now_shanghai(),
                     )
                     session.add(record)
                     saved += 1
