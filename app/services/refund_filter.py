@@ -3,16 +3,19 @@
 import logging
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional
+from typing import Optional, Dict, Tuple
 
 from sqlalchemy.orm import Session
 
 from app.models.database import sync_engine
 from app.models.result import RefundWhitelistPattern
-from app.services.hujing_api import get_chat_friend_info, get_chat_records
+from app.services.hujing_api import get_chat_records, get_friends_batch, get_friends_by_ids, get_chat_friend_info
 
 logger = logging.getLogger(__name__)
-
+# 每批获取的好友ID数量（你要的50）
+BATCH_SIZE = 50
+# 最大并发线程数（控制并发量，避免接口压力过大）
+MAX_WORKERS = 10
 
 def get_whitelist_patterns(session: Session = None) -> list[str]:
     """从数据库获取启用的协议话术白名单
@@ -100,38 +103,61 @@ def _should_filter_ahu_friend(friend_name: str | None) -> bool:
 
 def _build_friend_name_index(matched_pairs: list[tuple[str, int]],
                               log_func: callable = None,
-                              batch_task_id: str = None) -> dict[int, str]:
-    """通过全局唯一 friend_id 构建 friend_id -> nick 映射"""
+                              batch_task_id: str = None) -> tuple[dict[tuple[str, int], str], dict[int, dict]]:
+    """批量获取好友信息，构建两个映射
+
+    Returns:
+        tuple: (
+            {(user_id, friend_id): friend_name} 用于阿虎过滤,
+            {friend_id: friend_info} 用于返回给主任务复用
+        )
+    """
     friend_ids = sorted({friend_id for _, friend_id in matched_pairs if friend_id})
     if not friend_ids:
-        return {}
+        return {}, {}
 
     if log_func and batch_task_id:
-        log_func(batch_task_id, f"[过滤] 需要通过精准好友接口获取 {len(friend_ids)} 个好友昵称...", "info")
+        log_func(batch_task_id, f"[过滤] 需要通过精准好友接口获取 {len(friend_ids)} 个好友信息...按每{BATCH_SIZE}个分批处理",
+                 "info")
 
-    friend_name_index: dict[int, str] = {}
-    max_workers = min(10, len(friend_ids))
+    id_batches = [
+        friend_ids[i:i + BATCH_SIZE]
+        for i in range(0, len(friend_ids), BATCH_SIZE)
+    ]
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_friend_id = {
-            executor.submit(get_chat_friend_info, friend_id): friend_id
-            for friend_id in friend_ids
+    all_friends_info: Dict[int, dict] = {}
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # 提交所有批次任务
+        future_to_batch = {
+            executor.submit(get_friends_by_ids, batch): batch
+            for batch in id_batches
         }
-        for future in as_completed(future_to_friend_id):
-            friend_id = future_to_friend_id[future]
+
+        # 遍历完成的任务，合并结果
+        for future in as_completed(future_to_batch):
+            current_batch = future_to_batch[future]
             try:
-                friend_name = _get_quality_friend_name(future.result())
+                # 获取当前批次的批量查询结果
+                batch_result = future.result()
+                if batch_result:
+                    all_friends_info.update(batch_result)
             except Exception as e:
-                logger.error(f"[过滤] 获取好友 {friend_id} 昵称失败: {e}")
-                continue
+                logger.error(f"[过滤] 批量获取好友失败，批次ID：{current_batch[:5]}...，错误：{str(e)}")
+                if log_func and batch_task_id:
+                    log_func(batch_task_id, f"[过滤] 某批次获取失败，已跳过", "warn")
 
-            if friend_name:
-                friend_name_index[friend_id] = friend_name
+    # 构建 (user_id, friend_id) -> friend_name 映射（用于阿虎过滤）
+    friend_name_index: Dict[Tuple[str, int], str] = {}
+    for user_id, friend_id in matched_pairs:
+        friend_info = all_friends_info.get(friend_id)
+        friend_name = friend_info.get("friend_name") if friend_info else ""
+        friend_name_index[(user_id, friend_id)] = friend_name
 
+    # 完成日志
     if log_func and batch_task_id:
-        log_func(batch_task_id, f"[过滤] 精准好友接口获取完成，共索引 {len(friend_name_index)} 个好友昵称", "info")
+        log_func(batch_task_id, f"[过滤] 分批获取完成，成功索引 {len(friend_name_index)} 条好友映射", "info")
 
-    return friend_name_index
+    return friend_name_index, all_friends_info
 
 
 def check_protocol_refund_trigger(
@@ -202,7 +228,7 @@ def filter_matched_pairs(
     batch_task_id: str = None,
     log_func: callable = None,
     all_messages: Optional[list] = None
-) -> list[tuple[str, int]]:
+) -> tuple[list[tuple[str, int]], dict[int, dict]]:
     """批量过滤匹配到的销售-好友对
 
     优先使用 all_messages 在内存中分组匹配（零 API 调用），
@@ -217,10 +243,10 @@ def filter_matched_pairs(
         all_messages: 批量接口已获取的全部消息，传入后优先使用内存匹配
 
     Returns:
-        过滤后的销售-好友对列表
+        tuple: (过滤后的销售-好友对列表, 好友信息映射 {friend_id: friend_info})
     """
     if not matched_pairs:
-        return matched_pairs
+        return matched_pairs, {}
 
     # 获取协议话术白名单。新增的入口级过滤不依赖白名单，因此白名单为空时不能提前返回。
     whitelist_patterns = get_whitelist_patterns()
@@ -233,6 +259,7 @@ def filter_matched_pairs(
 
     filtered_pairs = []
     filtered_count = 0
+    friend_info_index: dict[int, dict] = {}  # 好友信息映射，用于返回
 
     # 优先使用内存匹配路径
     if all_messages is not None:
@@ -240,13 +267,17 @@ def filter_matched_pairs(
             log_func(batch_task_id, f"[过滤] 使用内存匹配模式（{len(all_messages)} 条消息，零 API 调用）", "info")
 
         pair_index = _build_pair_index(all_messages)
+
+        # 批量获取好友信息（一次API调用，带缓存）
+        friend_ids = [friend_id for _, friend_id in matched_pairs]
         try:
-            friend_name_index = _build_friend_name_index(matched_pairs, log_func, batch_task_id)
+            friend_name_index, friend_info_index = _build_friend_name_index(matched_pairs, log_func, batch_task_id)
         except Exception as e:
             logger.error(f"[过滤] 获取好友信息失败: {e}")
             if log_func and batch_task_id:
                 log_func(batch_task_id, f"[过滤错误] 获取好友信息失败: {str(e)}", "error")
             friend_name_index = {}
+            friend_info_index = {}
 
         for user_id, friend_id in matched_pairs:
             records = pair_index.get((user_id, friend_id), [])
@@ -260,7 +291,7 @@ def filter_matched_pairs(
                     log_func(batch_task_id, f"[过滤] 销售:{user_id} 好友:{friend_id} 无客户消息，已过滤", "info")
                 continue
 
-            friend_name = friend_name_index.get(friend_id)
+            friend_name = friend_name_index.get((user_id, friend_id))
             if _should_filter_ahu_friend(friend_name):
                 filtered_count += 1
                 if log_func and batch_task_id:
@@ -305,4 +336,4 @@ def filter_matched_pairs(
     if log_func and batch_task_id and filtered_count > 0:
         log_func(batch_task_id, f"[过滤] 共过滤掉 {filtered_count} 个聊天对", "info")
 
-    return filtered_pairs
+    return filtered_pairs, friend_info_index

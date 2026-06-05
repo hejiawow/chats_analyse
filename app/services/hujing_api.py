@@ -20,6 +20,7 @@ from config import settings
 _SALES_CACHE_TTL = 21600  # 销售列表：6 小时
 _FRIENDS_CACHE_TTL = 21600  # 好友列表：6 小时
 _DEPARTMENT_CACHE_TTL = 3600  # 组织架构：1 小时
+_FRIEND_INFO_CACHE_TTL = 21600  # 好友信息（按好友ID）：6 小时
 
 logger = logging.getLogger(__name__)
 
@@ -403,6 +404,112 @@ def get_friends_batch(
         progress_callback(
             batch_task_id, f"[好友] 好友列表获取完成 ({total} 个销售)", "info"
         )
+
+    return result
+
+
+def get_friends_by_ids(friend_ids: list[int], batch_size: int = 1000) -> dict[int, dict]:
+    """批量获取好友信息（按好友ID列表，带缓存）
+
+    Args:
+        friend_ids: 好友ID列表（整数列表）
+        batch_size: 每批最大好友数量，默认1000
+
+    Returns:
+        {friend_id: friend_info} 映射字典
+        friend_info 包含: friend_name, chat_title, alias, phone, remark_phone 等字段
+    """
+    if not friend_ids:
+        return {}
+
+    # 去重并排序
+    unique_friend_ids = sorted(set(friend_ids))
+
+    result: dict[int, dict] = {}
+    uncached_ids: list[int] = []
+
+    # 1. 先从缓存读取
+    for friend_id in unique_friend_ids:
+        cache_key = f"friend:{friend_id}"
+        cached = cache_get(cache_key)
+        if cached is not None:
+            result[friend_id] = cached
+        else:
+            uncached_ids.append(friend_id)
+
+    # 2. 批量获取未缓存的好友信息
+    if uncached_ids:
+        fresh_data = _get_friends_by_ids_from_api(uncached_ids, batch_size)
+        # 3. 写入缓存
+        for friend_id, info in fresh_data.items():
+            cache_key = f"friend:{friend_id}"
+            cache_set(cache_key, info, _FRIEND_INFO_CACHE_TTL)
+            result[friend_id] = info
+
+    logger.info(f"get_friends_by_ids: requested {len(unique_friend_ids)} ids, "
+                f"cached {len(unique_friend_ids) - len(uncached_ids)}, "
+                f"api fetched {len(result) - (len(unique_friend_ids) - len(uncached_ids))}, "
+                f"total {len(result)} results")
+    return result
+
+
+def _get_friends_by_ids_from_api(friend_ids: list[int], batch_size: int = 1000) -> dict[int, dict]:
+    """从API批量获取好友信息（内部函数，不带缓存）
+
+    Args:
+        friend_ids: 好友ID列表
+        batch_size: 每批最大好友数量
+
+    Returns:
+        {friend_id: friend_info} 映射字典
+    """
+    if not friend_ids:
+        return {}
+
+    result: dict[int, dict] = {}
+
+    # 分批处理（每批最多 batch_size 个好友ID）
+    for i in range(0, len(friend_ids), batch_size):
+        batch = friend_ids[i:i + batch_size]
+        batch_str = ",".join(str(fid) for fid in batch)
+
+        url = f"{settings.HUJING_API_BASE_URL}/api/friend/getFriendByIds"
+        data = _request(url, {
+            "app_id": settings.HUJING_APP_ID,
+            "friend_ids": batch_str,
+        })
+
+        if data is None:
+            logger.warning(f"_get_friends_by_ids_from_api: batch {i//batch_size + 1} API failed")
+            continue
+
+        # data 可能是列表（直接返回好友数组）或字典（需要从 result 字段获取）
+        if isinstance(data, list):
+            friends_list = data
+        elif isinstance(data, dict):
+            friends_list = data.get("result", [])
+        else:
+            friends_list = []
+
+        # 处理返回数据，构建映射字典
+        for f in friends_list:
+            friend_id = f.get("friendId")
+            if friend_id is None:
+                continue
+
+            try:
+                friend_id_int = int(friend_id)
+            except (ValueError, TypeError):
+                continue
+
+            # 字段映射：将API返回字段转换为质检需要的格式
+            result[friend_id_int] = {
+                "friend_name": f.get("nick") or f.get("remark") or None,
+                "chat_title": f.get("chat_title") or f.get("remark") or None,
+                "alias": f.get("alias") or None,
+                "phone": f.get("phone") or None,
+                "remark_phone": f.get("remarkPhone") or f.get("remark_phone") or None,
+            }
 
     return result
 
