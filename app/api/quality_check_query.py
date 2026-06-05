@@ -74,15 +74,18 @@ def _build_risk_keyword_filter(stmt, risk_levels: List[str] | None, keywords: Li
 
 def _apply_processing_filters(
     stmt,
-    action_priority: str | None = None,
+    action_priorities: List[str] | None = None,
+    risk_categories: List[str] | None = None,
     recommended_owner: str | None = None,
     action_type: str | None = None,
     needs_manual_review: bool | None = None,
     process_status: str | None = None,
 ):
     """应用质检处理建议相关筛选。"""
-    if action_priority:
-        stmt = stmt.where(QualityCheckResult.action_priority == action_priority)
+    if action_priorities:
+        stmt = stmt.where(QualityCheckResult.action_priority.in_(action_priorities))
+    if risk_categories:
+        stmt = stmt.where(QualityCheckResult.risk_category.in_(risk_categories))
     if recommended_owner:
         stmt = stmt.where(QualityCheckResult.recommended_owner == recommended_owner)
     if action_type:
@@ -106,7 +109,9 @@ async def query_quality_check_results(
     start_time: str | None = Query(None, description="开始时间（YYYY-MM-DD HH:mm:ss）"),
     end_time: str | None = Query(None, description="结束时间（YYYY-MM-DD HH:mm:ss）"),
     task_id: int | None = Query(None, description="关联质检任务ID"),
-    action_priority: str | None = Query(None, description="处理优先级：P0/P1/P2/P3"),
+    action_priority: str | None = Query(None, description="处理优先级（单选，向后兼容）"),
+    action_priorities: List[str] = Query(None, alias="action_priorities[]", description="处理优先级列表：P0/P1/P2/P3"),
+    risk_categories: List[str] = Query(None, alias="risk_categories[]", description="风险类别列表"),
     recommended_owner: str | None = Query(None, description="建议责任方"),
     action_type: str | None = Query(None, description="建议动作类型"),
     needs_manual_review: bool | None = Query(None, description="是否需要人工复核"),
@@ -122,6 +127,11 @@ async def query_quality_check_results(
     时间筛选：通过关联任务表的 start_time/end_time 筛选，
     筛选逻辑为检测时间范围与筛选时间范围有交集。
     """
+    # 合并向后兼容的单选 action_priority 到列表
+    effective_priorities = action_priorities
+    if not effective_priorities and action_priority:
+        effective_priorities = [action_priority]
+
     async with async_session() as session:
         stmt = select(QualityCheckResult)
         # LEFT JOIN 任务表，用于时间筛选和获取任务时间范围
@@ -132,7 +142,7 @@ async def query_quality_check_results(
         if friend_id is not None:
             stmt = stmt.where(QualityCheckResult.friend_id == friend_id)
         stmt = _build_risk_keyword_filter(stmt, risk_levels, keywords)
-        stmt = _apply_processing_filters(stmt, action_priority, recommended_owner, action_type, needs_manual_review, process_status)
+        stmt = _apply_processing_filters(stmt, effective_priorities, risk_categories, recommended_owner, action_type, needs_manual_review, process_status)
         if trigger_party:
             stmt = stmt.where(QualityCheckResult.trigger_party == trigger_party)
 
@@ -184,7 +194,7 @@ async def query_quality_check_results(
         if friend_id is not None:
             count_stmt = count_stmt.where(QualityCheckResult.friend_id == friend_id)
         count_stmt = _build_risk_keyword_filter(count_stmt, risk_levels, keywords)
-        count_stmt = _apply_processing_filters(count_stmt, action_priority, recommended_owner, action_type, needs_manual_review, process_status)
+        count_stmt = _apply_processing_filters(count_stmt, effective_priorities, risk_categories, recommended_owner, action_type, needs_manual_review, process_status)
         if trigger_party:
             count_stmt = count_stmt.where(QualityCheckResult.trigger_party == trigger_party)
         if task_id is not None:
@@ -232,7 +242,9 @@ async def get_quality_check_stats(
     trigger_party: str | None = Query(None, description="触发方：sales/customer/both"),
     keyword: str | None = Query(None, description="关键词"),
     keywords: List[str] = Query(None, alias="keywords[]", description="关键词列表"),
-    action_priority: str | None = Query(None, description="处理优先级：P0/P1/P2/P3"),
+    action_priority: str | None = Query(None, description="处理优先级（单选，向后兼容）"),
+    action_priorities: List[str] = Query(None, alias="action_priorities[]", description="处理优先级列表：P0/P1/P2/P3"),
+    risk_categories: List[str] = Query(None, alias="risk_categories[]", description="风险类别列表"),
     recommended_owner: str | None = Query(None, description="建议责任方"),
     action_type: str | None = Query(None, description="建议动作类型"),
     needs_manual_review: bool | None = Query(None, description="是否需要人工复核"),
@@ -246,6 +258,11 @@ async def get_quality_check_stats(
     时间筛选：通过任务表检测时间范围筛选，兼容旧数据
     注意：风险等级筛选不影响统计，只影响表格
     """
+    # 合并向后兼容的单选 action_priority 到列表
+    effective_priorities = action_priorities
+    if not effective_priorities and action_priority:
+        effective_priorities = [action_priority]
+
     # 筛选条件
     user_id_filter = user_id if user_id else None
     keyword_values = list(keywords or [])
@@ -255,7 +272,7 @@ async def get_quality_check_stats(
     # 判断是否有筛选条件（影响缓存策略）
     has_filters = (
         user_id_filter or friend_id or trigger_party or keyword_values
-        or action_priority or recommended_owner or action_type
+        or effective_priorities or risk_categories or recommended_owner or action_type
         or needs_manual_review is not None or process_status
         or start_time or end_time
     )
@@ -290,7 +307,8 @@ async def get_quality_check_stats(
         count_stmt = _build_risk_keyword_filter(count_stmt, None, keyword_values)
         count_stmt = _apply_processing_filters(
             count_stmt,
-            action_priority,
+            effective_priorities,
+            risk_categories,
             recommended_owner,
             action_type,
             needs_manual_review,
@@ -323,7 +341,8 @@ async def get_quality_check_stats(
         risk_stmt = _build_risk_keyword_filter(risk_stmt, None, keyword_values)
         risk_stmt = _apply_processing_filters(
             risk_stmt,
-            action_priority,
+            effective_priorities,
+            risk_categories,
             recommended_owner,
             action_type,
             needs_manual_review,
@@ -352,7 +371,8 @@ async def get_quality_check_stats(
         priority_stmt = _build_risk_keyword_filter(priority_stmt, None, keyword_values)
         priority_stmt = _apply_processing_filters(
             priority_stmt,
-            action_priority,
+            effective_priorities,
+            risk_categories,
             recommended_owner,
             action_type,
             needs_manual_review,
@@ -378,7 +398,8 @@ async def get_quality_check_stats(
         keyword_stmt = _build_risk_keyword_filter(keyword_stmt, None, keyword_values)
         keyword_stmt = _apply_processing_filters(
             keyword_stmt,
-            action_priority,
+            effective_priorities,
+            risk_categories,
             recommended_owner,
             action_type,
             needs_manual_review,
@@ -423,7 +444,9 @@ async def export_quality_check_results(
     risk_levels: List[str] = Query(None, alias="risk_levels[]", description="风险等级列表"),
     keywords: List[str] = Query(None, alias="keywords[]", description="关键词列表"),
     trigger_party: str | None = Query(None, description="触发方：sales/customer/both"),
-    action_priority: str | None = Query(None, description="处理优先级：P0/P1/P2/P3"),
+    action_priority: str | None = Query(None, description="处理优先级（单选，向后兼容）"),
+    action_priorities: List[str] = Query(None, alias="action_priorities[]", description="处理优先级列表：P0/P1/P2/P3"),
+    risk_categories: List[str] = Query(None, alias="risk_categories[]", description="风险类别列表"),
     recommended_owner: str | None = Query(None, description="建议责任方"),
     action_type: str | None = Query(None, description="建议动作类型"),
     needs_manual_review: bool | None = Query(None, description="是否需要人工复核"),
@@ -437,6 +460,11 @@ async def export_quality_check_results(
 
     时间筛选：通过任务表检测时间范围筛选，兼容旧数据
     """
+    # 合并向后兼容的单选 action_priority 到列表
+    effective_priorities = action_priorities
+    if not effective_priorities and action_priority:
+        effective_priorities = [action_priority]
+
     # 构建检测时间范围筛选条件（通过任务表）
     time_filter = _build_time_filter(start_time, end_time)
 
@@ -449,7 +477,7 @@ async def export_quality_check_results(
         if friend_id is not None:
             stmt = stmt.where(QualityCheckResult.friend_id == friend_id)
         stmt = _build_risk_keyword_filter(stmt, risk_levels, keywords)
-        stmt = _apply_processing_filters(stmt, action_priority, recommended_owner, action_type, needs_manual_review, process_status)
+        stmt = _apply_processing_filters(stmt, effective_priorities, risk_categories, recommended_owner, action_type, needs_manual_review, process_status)
         if trigger_party:
             stmt = stmt.where(QualityCheckResult.trigger_party == trigger_party)
         if time_filter is not None:

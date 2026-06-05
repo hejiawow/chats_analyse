@@ -27,7 +27,8 @@ class QualityResultsFrontendTest(unittest.TestCase):
 
         for param in (
             "keywords",
-            "action_priority",
+            "action_priorities",
+            "risk_categories",
             "recommended_owner",
             "action_type",
             "needs_manual_review",

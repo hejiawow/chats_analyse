@@ -111,8 +111,35 @@
             </a-select-opt-group>
           </a-select>
         </a-form-item>
+        <a-form-item label="风险类别">
+          <a-select
+            v-model:value="filters.risk_categories"
+            mode="multiple"
+            placeholder="请选择"
+            style="width: 200px"
+            allowClear
+            :maxTagCount="1"
+            :maxTagPlaceholder="omittedValues => `+${omittedValues.length}个`"
+          >
+            <a-select-option value="投诉">投诉</a-select-option>
+            <a-select-option value="退款">退款</a-select-option>
+            <a-select-option value="取消订单">取消订单</a-select-option>
+            <a-select-option value="监管介入">监管介入</a-select-option>
+            <a-select-option value="虚假宣传">虚假宣传</a-select-option>
+            <a-select-option value="服务不满">服务不满</a-select-option>
+            <a-select-option value="其他">其他</a-select-option>
+          </a-select>
+        </a-form-item>
         <a-form-item label="优先级">
-          <a-select v-model:value="filters.action_priority" placeholder="全部" style="width: 110px" allowClear>
+          <a-select
+            v-model:value="filters.action_priorities"
+            mode="multiple"
+            placeholder="请选择"
+            style="width: 180px"
+            allowClear
+            :maxTagCount="1"
+            :maxTagPlaceholder="omittedValues => `+${omittedValues.length}个`"
+          >
             <a-select-option value="P0">P0 立即</a-select-option>
             <a-select-option value="P1">P1 今日</a-select-option>
             <a-select-option value="P2">P2 复核</a-select-option>
@@ -553,9 +580,10 @@ const filters = reactive({
   user_id: '',
   friend_id: '',
   risk_levels: [],   // 风险等级数组
+  risk_categories: [], // 风险类别数组
   keywords: [],      // 关键词数组
   trigger_party: undefined,
-  action_priority: undefined,
+  action_priorities: [],  // 优先级数组
   recommended_owner: undefined,
   action_type: undefined,
   needs_manual_review: undefined,
@@ -834,7 +862,8 @@ async function loadStats() {
     if (filters.keywords && filters.keywords.length > 0) params.keywords = filters.keywords
     if (filters.keyword) params.keyword = filters.keyword
     if (filters.trigger_party) params.trigger_party = filters.trigger_party
-    if (filters.action_priority) params.action_priority = filters.action_priority
+    if (filters.action_priorities && filters.action_priorities.length > 0) params.action_priorities = filters.action_priorities
+    if (filters.risk_categories && filters.risk_categories.length > 0) params.risk_categories = filters.risk_categories
     if (filters.recommended_owner) params.recommended_owner = filters.recommended_owner
     if (filters.action_type) params.action_type = filters.action_type
     if (filters.needs_manual_review !== undefined) params.needs_manual_review = filters.needs_manual_review
@@ -954,7 +983,8 @@ async function loadData() {
 //     if (filters.risk_level) params.risk_level = filters.risk_level
 //     if (filters.keyword) params.keyword = filters.keyword
     if (filters.trigger_party) params.trigger_party = filters.trigger_party
-    if (filters.action_priority) params.action_priority = filters.action_priority
+    if (filters.action_priorities && filters.action_priorities.length > 0) params.action_priorities = filters.action_priorities
+    if (filters.risk_categories && filters.risk_categories.length > 0) params.risk_categories = filters.risk_categories
     if (filters.recommended_owner) params.recommended_owner = filters.recommended_owner
     if (filters.action_type) params.action_type = filters.action_type
     if (filters.needs_manual_review !== undefined) params.needs_manual_review = filters.needs_manual_review
@@ -991,7 +1021,8 @@ function handleReset() {
   filters.risk_levels = []
   filters.keywords = []
   filters.trigger_party = undefined
-  filters.action_priority = undefined
+  filters.action_priorities = []
+  filters.risk_categories = []
   filters.recommended_owner = undefined
   filters.action_type = undefined
   filters.needs_manual_review = undefined
@@ -1200,7 +1231,8 @@ async function handleExport() {
 //     if (filters.risk_level) params.risk_level = filters.risk_level
 //     if (filters.keyword) params.keyword = filters.keyword
     if (filters.trigger_party) params.trigger_party = filters.trigger_party
-    if (filters.action_priority) params.action_priority = filters.action_priority
+    if (filters.action_priorities && filters.action_priorities.length > 0) params.action_priorities = filters.action_priorities
+    if (filters.risk_categories && filters.risk_categories.length > 0) params.risk_categories = filters.risk_categories
     if (filters.recommended_owner) params.recommended_owner = filters.recommended_owner
     if (filters.action_type) params.action_type = filters.action_type
     if (filters.needs_manual_review !== undefined) params.needs_manual_review = filters.needs_manual_review
@@ -1240,6 +1272,20 @@ watch(() => filters.risk_levels, (newVal, oldVal) => {
 
 // 监听关键词变化，自动触发筛选
 watch(() => filters.keywords, (newVal, oldVal) => {
+  if (oldVal !== undefined && newVal !== oldVal) {
+    handleSearch()
+  }
+})
+
+// 监听风险类别变化，自动触发筛选
+watch(() => filters.risk_categories, (newVal, oldVal) => {
+  if (oldVal !== undefined && newVal !== oldVal) {
+    handleSearch()
+  }
+})
+
+// 监听优先级变化，自动触发筛选
+watch(() => filters.action_priorities, (newVal, oldVal) => {
   if (oldVal !== undefined && newVal !== oldVal) {
     handleSearch()
   }
