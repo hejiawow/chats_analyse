@@ -1,18 +1,20 @@
 # -*- coding: utf-8 -*-
 """虎鲸 API 服务封装"""
+
 import hashlib
 import logging
 import time
+from datetime import datetime, timedelta
+
 import requests
 import urllib3
-from datetime import datetime, timedelta
-from requests.exceptions import ConnectTimeout, ConnectionError, RequestException
+from requests.exceptions import ConnectionError, ConnectTimeout, RequestException
 
 # 禁用 SSL 警告（内部 API 可能证书配置不完整）
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+from app.services.cache import cache_clear_pattern, cache_get, cache_set
 from config import settings
-from app.services.cache import cache_get, cache_set, cache_clear_pattern
 
 # 缓存过期时间（秒）
 _SALES_CACHE_TTL = 21600  # 销售列表：6 小时
@@ -38,7 +40,9 @@ def _build_headers() -> dict:
     }
 
 
-def _request(url: str, form_data: dict, max_retries: int = 3, timeout: int = 30) -> dict | None:
+def _request(
+    url: str, form_data: dict, max_retries: int = 3, timeout: int = 30
+) -> dict | None:
     """带重试的 POST 请求"""
     import time as _time
 
@@ -46,10 +50,14 @@ def _request(url: str, form_data: dict, max_retries: int = 3, timeout: int = 30)
     for retry in range(max_retries):
         try:
             print(f"[DEBUG] _request: POST {url}, data={form_data}")
-            response = requests.post(url, headers=headers, data=form_data, timeout=timeout, verify=False)
+            response = requests.post(
+                url, headers=headers, data=form_data, timeout=timeout, verify=False
+            )
             response.raise_for_status()
             result = response.json()
-            print(f"[DEBUG] _request response: code={result.get('code')}, msg={result.get('msg')}")
+            print(
+                f"[DEBUG] _request response: code={result.get('code')}, msg={result.get('msg')}"
+            )
             if result.get("code") == 0:
                 return result.get("data", {})
             else:
@@ -57,35 +65,51 @@ def _request(url: str, form_data: dict, max_retries: int = 3, timeout: int = 30)
         except (ConnectTimeout, ConnectionError, RequestException) as e:
             print(f"[DEBUG] _request error (retry {retry}): {e}")
             if retry < max_retries - 1:
-                _time.sleep(2 ** retry)
+                _time.sleep(2**retry)
     return None
 
 
-def get_chat_records(user_id: str, friend_id: int, start_time: str = "2000-01-01 00:00:00",
-                     end_time: str = "2099-12-31 23:59:59", page_size: int = 1000000) -> list:
+def get_chat_records(
+    user_id: str,
+    friend_id: int,
+    start_time: str = "2000-01-01 00:00:00",
+    end_time: str = "2099-12-31 23:59:59",
+    page_size: int = 1000000,
+) -> list:
     """获取聊天记录（自动分页）"""
     all_chats = []
     base_url = f"{settings.HUJING_API_BASE_URL}/api/chat/showChatByUser"
 
-    print(f"[DEBUG] get_chat_records: user_id={user_id}, friend_id={friend_id}, start={start_time}, end={end_time}")
+    print(
+        f"[DEBUG] get_chat_records: user_id={user_id}, friend_id={friend_id}, start={start_time}, end={end_time}"
+    )
 
     for current_page in range(1, 51):
-        data = _request(base_url, {
-            "app_id": settings.HUJING_APP_ID,
-            "user_id": user_id,
-            "friend_id": friend_id,
-            "start_time": start_time,
-            "end_time": end_time,
-            "page": current_page,
-            "page_size": page_size,
-        }, max_retries=1, timeout=30)
+        data = _request(
+            base_url,
+            {
+                "app_id": settings.HUJING_APP_ID,
+                "user_id": user_id,
+                "friend_id": friend_id,
+                "start_time": start_time,
+                "end_time": end_time,
+                "page": current_page,
+                "page_size": page_size,
+            },
+            max_retries=1,
+            timeout=30,
+        )
 
         if data is None:
-            print(f"[DEBUG] get_chat_records: page {current_page} returned None (API failed)")
+            print(
+                f"[DEBUG] get_chat_records: page {current_page} returned None (API failed)"
+            )
             break
 
         chat_list = data.get("result", [])
-        print(f"[DEBUG] get_chat_records: page {current_page} returned {len(chat_list)} records")
+        print(
+            f"[DEBUG] get_chat_records: page {current_page} returned {len(chat_list)} records"
+        )
         if not chat_list:
             break
 
@@ -97,11 +121,11 @@ def get_chat_records(user_id: str, friend_id: int, start_time: str = "2000-01-01
 
 
 def get_chat_records_for_quality_check(
-        user_id: str,
-        friend_id: int,
-        end_time: str,
-        chat_days: int = None,
-        max_records: int = None
+    user_id: str,
+    friend_id: int,
+    end_time: str,
+    chat_days: int = None,
+    max_records: int = None,
 ) -> list:
     """获取质检检测专用的聊天记录（自动计算时间范围 + 条数限制）
 
@@ -126,8 +150,10 @@ def get_chat_records_for_quality_check(
     start_dt = end_dt - timedelta(days=chat_days)
     start_time = start_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-    logger.info(f"[质检聊天] user_id={user_id}, friend_id={friend_id}, "
-                f"时间范围: {start_time} ~ {end_time} (往前{chat_days}天)")
+    logger.info(
+        f"[质检聊天] user_id={user_id}, friend_id={friend_id}, "
+        f"时间范围: {start_time} ~ {end_time} (往前{chat_days}天)"
+    )
 
     # 调用原有函数获取聊天记录
     all_chats = get_chat_records(user_id, friend_id, start_time, end_time)
@@ -151,11 +177,14 @@ def get_all_sales(page: int = 1, page_size: int = 1000000) -> list:
         return cached
 
     url = f"{settings.HUJING_API_BASE_URL}/api/user/getAllUser"
-    data = _request(url, {
-        "app_id": settings.HUJING_APP_ID,
-        "page": page,
-        "page_size": page_size,
-    })
+    data = _request(
+        url,
+        {
+            "app_id": settings.HUJING_APP_ID,
+            "page": page,
+            "page_size": page_size,
+        },
+    )
     if data:
         result = data.get("result", [])
         cache_set(cache_key, result, _SALES_CACHE_TTL)
@@ -192,19 +221,23 @@ def find_sales_by_name_with_friend(username: str, identifier: str) -> list:
         friends = get_friends_list(user_id)
         for f in friends:
             if _match_friend(f, identifier):
-                matched.append({
-                    "user_id": user_id,
-                    "username": username,
-                    "friend_id": f.get("friendId"),
-                    "friend_nick": f.get("nick") or f.get("remark") or "",
-                    "friend_wx_id": f.get("friend_wx_id") or "",
-                })
+                matched.append(
+                    {
+                        "user_id": user_id,
+                        "username": username,
+                        "friend_id": f.get("friendId"),
+                        "friend_nick": f.get("nick") or f.get("remark") or "",
+                        "friend_wx_id": f.get("friend_wx_id") or "",
+                    }
+                )
                 break  # 每个销售只取一个匹配的好友
 
     return matched
 
 
-def resolve_friend_id_by_phone(user_id: str, phone: str) -> tuple[int | None, dict | None]:
+def resolve_friend_id_by_phone(
+    user_id: str, phone: str
+) -> tuple[int | None, dict | None]:
     """通过手机号/备注手机号查找好友ID，返回 (friend_id, friend_info)"""
     friends_list = get_friends_list(user_id)
     for f in friends_list:
@@ -213,7 +246,9 @@ def resolve_friend_id_by_phone(user_id: str, phone: str) -> tuple[int | None, di
     return None, None
 
 
-def resolve_friend_by_identifier(user_id: str, identifier: str) -> tuple[int | None, dict | None]:
+def resolve_friend_by_identifier(
+    user_id: str, identifier: str
+) -> tuple[int | None, dict | None]:
     """通过好友标识（手机号/微信号/备注手机号）查找好友ID，返回 (friend_id, friend_info)"""
     friends_list = get_friends_list(user_id)
     for f in friends_list:
@@ -242,7 +277,9 @@ def _match_friend(friend: dict, identifier: str) -> bool:
     return False
 
 
-def get_friends_list(user_id: str, is_group: str = "0", skip_deleted: bool = True) -> list:
+def get_friends_list(
+    user_id: str, is_group: str = "0", skip_deleted: bool = True
+) -> list:
     """获取好友列表（单页 + 去重 + 过滤已删除）（带缓存）"""
     cache_key = f"hujing:friends:{user_id}:{is_group}"
     cached = cache_get(cache_key)
@@ -252,13 +289,16 @@ def get_friends_list(user_id: str, is_group: str = "0", skip_deleted: bool = Tru
         return cached
 
     url = f"{settings.HUJING_API_BASE_URL}/api/friend/getAllFriendByUserId"
-    data = _request(url, {
-        "app_id": settings.HUJING_APP_ID,
-        "user_id": user_id,
-        "is_group": is_group,
-        "page": 1,
-        "page_size": 1000000,
-    })
+    data = _request(
+        url,
+        {
+            "app_id": settings.HUJING_APP_ID,
+            "user_id": user_id,
+            "is_group": is_group,
+            "page": 1,
+            "page_size": 1000000,
+        },
+    )
 
     if data is None:
         return []
@@ -279,7 +319,9 @@ def get_friends_list(user_id: str, is_group: str = "0", skip_deleted: bool = Tru
         except (ValueError, TypeError):
             return datetime.min
 
-    sorted_friends = sorted(unique_friends, key=lambda x: _safe_parse_time(x.get("createTime", "")))
+    sorted_friends = sorted(
+        unique_friends, key=lambda x: _safe_parse_time(x.get("createTime", ""))
+    )
     # 缓存原始数据（不缓存 skip_deleted 过滤结果）
     cache_set(cache_key, sorted_friends, _FRIENDS_CACHE_TTL)
     if skip_deleted:
@@ -287,20 +329,81 @@ def get_friends_list(user_id: str, is_group: str = "0", skip_deleted: bool = Tru
     return sorted_friends
 
 
-def get_friends_batch(user_ids: list[str]) -> dict[str, list[dict]]:
-    """批量获取多个销售的好友列表（带缓存）
+def get_friends_batch(
+    user_ids: list[str], progress_callback: callable = None, batch_task_id: str = None
+) -> dict[str, list[dict]]:
+    """批量获取多个销售的好友列表（带缓存 + 并发）
 
     Args:
         user_ids: 销售 ID 列表
+        progress_callback: 可选的进度回调函数，签名为 (task_id, message, level)
+        batch_task_id: 批量任务ID（用于日志）
 
     Returns:
         {user_id: [friend_info, ...]} 映射字典
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     result = {}
+    total = len(user_ids)
+    if total == 0:
+        return result
+
+    if progress_callback and batch_task_id:
+        progress_callback(
+            batch_task_id, f"[好友] 开始并发获取 {total} 个销售的好友列表...", "info"
+        )
+
+    # 预检查哪些命中缓存，哪些需要走网络
+    cached_ids = []
+    fetch_ids = []
     for user_id in user_ids:
-        # 利用现有的缓存机制
-        friends = get_friends_list(user_id)
-        result[user_id] = friends
+        cache_key = f"hujing:friends:{user_id}:0"
+        if cache_get(cache_key) is not None:
+            cached_ids.append(user_id)
+        else:
+            fetch_ids.append(user_id)
+
+    if progress_callback and batch_task_id:
+        progress_callback(
+            batch_task_id,
+            f"[好友] 缓存命中 {len(cached_ids)} 个，需网络请求 {len(fetch_ids)} 个",
+            "info",
+        )
+
+    # 缓存命中：直接同步获取（极快）
+    for user_id in cached_ids:
+        result[user_id] = get_friends_list(user_id)
+
+    # 网络请求：并发获取（最多 5 个并发，避免压垮上游）
+    done_count = len(cached_ids)
+    if fetch_ids:
+        with ThreadPoolExecutor(max_workers=min(5, len(fetch_ids))) as executor:
+            future_to_uid = {
+                executor.submit(get_friends_list, uid): uid for uid in fetch_ids
+            }
+            for future in as_completed(future_to_uid):
+                user_id = future_to_uid[future]
+                try:
+                    result[user_id] = future.result()
+                except Exception as e:
+                    logger.error(f"[好友] 获取销售 {user_id} 的好友列表失败: {e}")
+                    result[user_id] = []
+                done_count += 1
+                if progress_callback and batch_task_id and (
+                    done_count % 5 == 0 or done_count == total
+                ):
+                    progress_callback(
+                        batch_task_id,
+                        f"[好友] 进度: {done_count}/{total} 个销售",
+                        "info",
+                    )
+
+    if progress_callback and batch_task_id:
+        progress_callback(
+            batch_task_id, f"[好友] 好友列表获取完成 ({total} 个销售)", "info"
+        )
+
     return result
 
 
@@ -332,9 +435,12 @@ def get_department_tree() -> dict:
         return cached
 
     url = f"{settings.HUJING_API_BASE_URL}/api/dept/list"
-    data = _request(url, {
-        "app_id": settings.HUJING_APP_ID,
-    })
+    data = _request(
+        url,
+        {
+            "app_id": settings.HUJING_APP_ID,
+        },
+    )
 
     if data is None:
         return {"departments": [], "sales": []}
@@ -448,7 +554,9 @@ def get_chat_pairs(start_time: str, end_time: str, page_size: int = 10000) -> di
     }
 
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=30, verify=False)
+        response = requests.get(
+            url, headers=headers, params=params, timeout=30, verify=False
+        )
         response.raise_for_status()
         result = response.json()
         return {
@@ -460,7 +568,28 @@ def get_chat_pairs(start_time: str, end_time: str, page_size: int = 10000) -> di
         return {"total": 0, "data": [], "error": str(e)}
 
 
-def get_all_chat_messages(start_time: str, end_time: str, page_size: int = 10000) -> list:
+def get_chat_friend_info(friend_id: int) -> dict | None:
+    """通过全局唯一 friend_id 获取聊天好友详情（新聊天库接口）"""
+    url = f"{settings.HUJING_CHAT_API_URL}/api/v1/chat/friends/{friend_id}"
+    headers = {
+        "x-api-key": settings.HUJING_CHAT_API_KEY,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=30, verify=False)
+        if response.status_code == 404:
+            logger.info(f"get_chat_friend_info not found: friend_id={friend_id}")
+            return None
+        response.raise_for_status()
+        return response.json()
+    except RequestException as e:
+        logger.error(f"get_chat_friend_info error: friend_id={friend_id}, error={e}")
+        return None
+
+
+def get_all_chat_messages(
+    start_time: str, end_time: str, page_size: int = 10000
+) -> list:
     """获取指定时间范围内所有聊天记录（新接口）
 
     注意：新接口限制时间范围不能超过2天，因此需要分段请求。
@@ -514,7 +643,9 @@ def get_all_chat_messages(start_time: str, end_time: str, page_size: int = 10000
             }
 
             try:
-                response = requests.get(url, headers=headers, params=params, timeout=60, verify=False)
+                response = requests.get(
+                    url, headers=headers, params=params, timeout=60, verify=False
+                )
                 response.raise_for_status()
                 result = response.json()
 
@@ -532,7 +663,7 @@ def get_all_chat_messages(start_time: str, end_time: str, page_size: int = 10000
 
             except RequestException as e:
                 try:
-                    response_text = response.text if 'response' in locals() else 'N/A'
+                    response_text = response.text if "response" in locals() else "N/A"
                     logger.error(f"get_all_chat_messages error: {e}")
                     logger.debug(f"Response content: {response_text[:500]}")
                 except:

@@ -2,18 +2,38 @@
   <div class="page-card quality-results-page">
     <!-- 统计卡片 -->
     <div class="qr-stats-cards">
-      <a-card class="qr-stat-card" size="small">
-        <a-statistic title="总数" :value="stats.total" />
-      </a-card>
-      <a-card class="qr-stat-card high" size="small">
-        <a-statistic title="高风险" :value="stats.risk_distribution?.high || 0" :value-style="{ color: '#ef4444' }" />
-      </a-card>
-      <a-card class="qr-stat-card medium" size="small">
-        <a-statistic title="中风险" :value="stats.risk_distribution?.medium || 0" :value-style="{ color: '#f59e0b' }" />
-      </a-card>
-      <a-card class="qr-stat-card low" size="small">
-        <a-statistic title="低风险" :value="stats.risk_distribution?.low || 0" :value-style="{ color: '#3b82f6' }" />
-      </a-card>
+      <div class="qr-stat-chip">
+        <span class="qr-stat-label">总数</span>
+        <span class="qr-stat-value">{{ stats.total }}</span>
+      </div>
+      <div class="qr-stat-chip high">
+        <span class="qr-stat-label">高风险</span>
+        <span class="qr-stat-value">{{ stats.risk_distribution?.high || 0 }}</span>
+      </div>
+      <div class="qr-stat-chip medium">
+        <span class="qr-stat-label">中风险</span>
+        <span class="qr-stat-value">{{ stats.risk_distribution?.medium || 0 }}</span>
+      </div>
+      <div class="qr-stat-chip low">
+        <span class="qr-stat-label">低风险</span>
+        <span class="qr-stat-value">{{ stats.risk_distribution?.low || 0 }}</span>
+      </div>
+      <div class="qr-stat-chip p0">
+        <span class="qr-stat-label">P0 立即</span>
+        <span class="qr-stat-value">{{ stats.priority_distribution?.P0 || 0 }}</span>
+      </div>
+      <div class="qr-stat-chip p1">
+        <span class="qr-stat-label">P1 今日</span>
+        <span class="qr-stat-value">{{ stats.priority_distribution?.P1 || 0 }}</span>
+      </div>
+      <div class="qr-stat-chip p2">
+        <span class="qr-stat-label">P2 复核</span>
+        <span class="qr-stat-value">{{ stats.priority_distribution?.P2 || 0 }}</span>
+      </div>
+      <div class="qr-stat-chip p3">
+        <span class="qr-stat-label">P3 观察</span>
+        <span class="qr-stat-value">{{ stats.priority_distribution?.P3 || 0 }}</span>
+      </div>
     </div>
 
     <!-- 可折叠统计详情 -->
@@ -34,7 +54,7 @@
 
     <!-- 筛选栏 -->
     <a-form :model="filters" class="qr-filter-bar">
-      <div class="qr-filter-row">
+      <div class="qr-filter-fields">
         <a-form-item label="时间范围">
           <a-range-picker
             v-model:value="filters.timeRange"
@@ -57,8 +77,6 @@
             <a-select-option value="both">双方</a-select-option>
           </a-select>
         </a-form-item>
-      </div>
-      <div class="qr-filter-row">
         <a-form-item label="风险等级">
           <a-select
             v-model:value="filters.risk_levels"
@@ -110,8 +128,6 @@
             <a-select-option value="无需处理">无需处理</a-select-option>
           </a-select>
         </a-form-item>
-      </div>
-      <div class="qr-filter-row">
         <a-form-item label="动作类型">
           <a-select v-model:value="filters.action_type" placeholder="全部" style="width: 130px" allowClear>
             <a-select-option value="立即介入">立即介入</a-select-option>
@@ -146,6 +162,34 @@
       </div>
     </a-form>
 
+    <!-- 列设置 -->
+    <div class="qr-table-toolbar">
+      <a-popover
+        v-model:open="columnSettingsOpen"
+        title="列显示设置"
+        trigger="click"
+        placement="bottomRight"
+        :overlay-style="{ width: '280px' }"
+      >
+        <template #content>
+          <div class="qr-column-settings">
+            <a-checkbox-group
+              v-model:value="visibleKeysArray"
+              :options="columnOptions"
+              class="qr-column-checkboxes"
+            />
+            <div class="qr-column-settings-footer">
+              <a-button size="small" @click="resetColumns">重置默认</a-button>
+              <a-button size="small" type="primary" @click="columnSettingsOpen = false">确定</a-button>
+            </div>
+          </div>
+        </template>
+        <a-button size="small">
+          <SettingOutlined /> 列设置
+        </a-button>
+      </a-popover>
+    </div>
+
     <!-- 结果表格 -->
     <a-table
       :columns="columns"
@@ -159,7 +203,10 @@
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'created_at'">
-          <span>{{ formatDateTime(record.created_at) }}</span>
+          <div class="qr-time-cell">
+            <span class="qr-time-date">{{ formatDate(record.created_at) }}</span>
+            <span class="qr-time-hms">{{ formatTime(record.created_at) }}</span>
+          </div>
         </template>
         <template v-if="column.key === 'user_name'">
           <div>
@@ -471,8 +518,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch, nextTick } from 'vue'
+import { ref, reactive, onMounted, watch, nextTick, computed } from 'vue'
 import { message } from 'ant-design-vue'
+import { SettingOutlined } from '@ant-design/icons-vue'
 import * as echarts from 'echarts'
 import { getQualityCheckList, getQualityCheckStats, exportQualityCheckResults, getActiveKeywords, getQualityCheckChatRecords, updateQualityCheckResult, getQualityCheckModificationLogs, getQualityCheckDetail } from '@/api/qualitycheck'
 
@@ -531,18 +579,24 @@ const pagination = reactive({
   total: 0
 })
 
-const columns = [
-  { title: '时间', dataIndex: 'created_at', key: 'created_at', minWidth: 160, ellipsis: true},
-  { title: '销售', key: 'user_name', minWidth: 130, ellipsis: true },
+// 排序状态
+const sortState = reactive({
+  field: null,
+  order: null  // 'ascend' | 'descend' | null
+})
+
+const allColumns = [
+  { title: '销售', key: 'user_name', minWidth: 130, ellipsis: true, fixed: 'left' },
   { title: '好友', key: 'friend_name', minWidth: 130, ellipsis: true },
+  { title: '时间', dataIndex: 'created_at', key: 'created_at', minWidth: 120, ellipsis: true, sorter: true },
   { title: '好友备注', dataIndex: 'chat_title', key: 'chat_title', minWidth: 120, ellipsis: true },
   { title: '好友别名', dataIndex: 'alias', key: 'alias', minWidth: 120, ellipsis: true },
   { title: '绑定手机号', dataIndex: 'phone', key: 'phone', minWidth: 130, ellipsis: true },
   { title: '备注手机号', dataIndex: 'remark_phone', key: 'remark_phone', minWidth: 130, ellipsis: true },
-  { title: '风险等级', key: 'risk_level', minWidth: 100 },
+  { title: '风险等级', dataIndex: 'risk_level', key: 'risk_level', minWidth: 100, sorter: true },
   { title: '触发方', dataIndex: 'trigger_party', key: 'trigger_party', width: 100 },
   { title: '问题摘要', key: 'issue_summary', width: 220 },
-  { title: '优先级', key: 'action_priority', minWidth: 90 },
+  { title: '优先级', dataIndex: 'action_priority', key: 'action_priority', minWidth: 90, sorter: true },
   { title: '责任方', key: 'recommended_owner', minWidth: 100 },
   { title: '动作类型', key: 'action_type', minWidth: 110, ellipsis: true },
   { title: '处理状态', key: 'process_status', minWidth: 100 },
@@ -551,6 +605,71 @@ const columns = [
   { title: '备注', dataIndex: 'remark', key: 'remark', width: 150, ellipsis: true },
   { title: '操作', key: 'actions', width: 110, fixed: 'right' },
 ]
+
+// 列显示配置
+const COLUMN_CONFIG_KEY = 'qr_visible_columns'
+const allColumnKeys = allColumns.map(c => c.key)
+
+function loadVisibleColumns() {
+  try {
+    const test = '__test__'
+    localStorage.setItem(test, test)
+    localStorage.removeItem(test)
+  } catch {
+    return new Set(allColumnKeys)
+  }
+  try {
+    const saved = localStorage.getItem(COLUMN_CONFIG_KEY)
+    if (saved) {
+      const keys = JSON.parse(saved)
+      if (Array.isArray(keys) && keys.length > 0 && keys.some(k => allColumnKeys.includes(k))) {
+        return new Set(keys)
+      }
+    }
+  } catch { /* 忽略 */ }
+  return new Set(allColumnKeys)
+}
+
+const visibleColumnKeys = ref(loadVisibleColumns())
+
+function saveVisibleColumns() {
+  try {
+    localStorage.setItem(COLUMN_CONFIG_KEY, JSON.stringify([...visibleColumnKeys.value]))
+  } catch { /* 忽略 */ }
+}
+
+// 实际传给 a-table 的列（过滤后的）
+const columns = computed(() => {
+  return allColumns.filter(col => {
+    // 操作列和销售列始终显示
+    if (col.key === 'actions') return true
+    if (col.fixed === 'left') return true
+    return visibleColumnKeys.value.has(col.key)
+  })
+})
+
+// checkbox 绑定的数组形式
+const visibleKeysArray = computed({
+  get: () => [...visibleColumnKeys.value],
+  set: (val) => {
+    visibleColumnKeys.value = new Set(val)
+    saveVisibleColumns()
+  }
+})
+
+// 列设置面板的选项列表
+const columnOptions = computed(() => {
+  return allColumns
+    .filter(c => c.key !== 'actions' && c.fixed !== 'left')
+    .map(c => ({ label: c.title, value: c.key }))
+})
+
+const columnSettingsOpen = ref(false)
+
+function resetColumns() {
+  visibleColumnKeys.value = new Set(allColumnKeys)
+  saveVisibleColumns()
+}
 
 // 详情
 const detailVisible = ref(false)
@@ -587,6 +706,34 @@ function getRiskColor(level) {
 function getRiskText(level) {
   const map = { high: '高风险', medium: '中风险', low: '低风险', none: '无风险', unknown: '未知' }
   return map[level] || '未知'
+}
+
+// 格式化日期部分 YYYY-MM-DD
+function formatDate(isoString) {
+  if (!isoString) return '-'
+  try {
+    const date = new Date(isoString)
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  } catch {
+    return isoString
+  }
+}
+
+// 格式化时间部分 HH:mm:ss
+function formatTime(isoString) {
+  if (!isoString) return ''
+  try {
+    const date = new Date(isoString)
+    const hour = String(date.getHours()).padStart(2, '0')
+    const minute = String(date.getMinutes()).padStart(2, '0')
+    const second = String(date.getSeconds()).padStart(2, '0')
+    return `${hour}:${minute}:${second}`
+  } catch {
+    return ''
+  }
 }
 
 // 时间格式化：将 ISO 格式转为 YYYY-MM-DD HH:mm:ss
@@ -684,6 +831,7 @@ async function loadStats() {
     const params = {}
     if (filters.user_id) params.user_id = filters.user_id
     if (filters.friend_id) params.friend_id = filters.friend_id
+    if (filters.keywords && filters.keywords.length > 0) params.keywords = filters.keywords
     if (filters.keyword) params.keyword = filters.keyword
     if (filters.trigger_party) params.trigger_party = filters.trigger_party
     if (filters.action_priority) params.action_priority = filters.action_priority
@@ -806,9 +954,18 @@ async function loadData() {
 //     if (filters.risk_level) params.risk_level = filters.risk_level
 //     if (filters.keyword) params.keyword = filters.keyword
     if (filters.trigger_party) params.trigger_party = filters.trigger_party
+    if (filters.action_priority) params.action_priority = filters.action_priority
+    if (filters.recommended_owner) params.recommended_owner = filters.recommended_owner
+    if (filters.action_type) params.action_type = filters.action_type
+    if (filters.needs_manual_review !== undefined) params.needs_manual_review = filters.needs_manual_review
+    if (filters.process_status) params.process_status = filters.process_status
     if (filters.timeRange && filters.timeRange.length === 2) {
       params.start_time = filters.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
       params.end_time = filters.timeRange[1].format('YYYY-MM-DD HH:mm:ss')
+    }
+    if (sortState.field && sortState.order) {
+      params.sort_field = sortState.field
+      params.sort_order = sortState.order
     }
     const res = await getQualityCheckList(params)
     data.value = res.data || []
@@ -840,6 +997,8 @@ function handleReset() {
   filters.needs_manual_review = undefined
   filters.process_status = undefined
   filters.timeRange = null
+  sortState.field = null
+  sortState.order = null
   pagination.current = 1
   loadData()
   loadStats()
@@ -859,9 +1018,17 @@ async function copyReplySuggestion() {
   }
 }
 
-// 分页
-function handleTableChange(pag) {
+// 分页 + 排序
+function handleTableChange(pag, _filters, sorter) {
   pagination.current = pag.current
+  const sortField = sorter?.field || sorter?.columnKey
+  if (sortField) {
+    sortState.field = sortField
+    sortState.order = sorter.order || null
+  } else {
+    sortState.field = null
+    sortState.order = null
+  }
   loadData()
 }
 
@@ -1090,29 +1257,76 @@ onMounted(() => {
   width: 100%;
 }
 
-/* 统计卡片 */
+/* 统计卡片 - 紧凑布局 */
 .qr-stats-cards {
   display: flex;
-  gap: 16px;
-  margin-bottom: 20px;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
-.qr-stat-card {
-  flex: 1;
-  border-radius: 8px;
+.qr-stat-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  transition: box-shadow 0.2s;
 }
 
-.qr-stat-card.high {
+.qr-stat-chip:hover {
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+.qr-stat-chip.high {
   border-left: 3px solid #ef4444;
 }
 
-.qr-stat-card.medium {
+.qr-stat-chip.medium {
   border-left: 3px solid #f59e0b;
 }
 
-.qr-stat-card.low {
+.qr-stat-chip.low {
   border-left: 3px solid #3b82f6;
 }
+
+.qr-stat-chip.p0 {
+  border-left: 3px solid #dc2626;
+}
+
+.qr-stat-chip.p1 {
+  border-left: 3px solid #ea580c;
+}
+
+.qr-stat-chip.p2 {
+  border-left: 3px solid #2563eb;
+}
+
+.qr-stat-chip.p3 {
+  border-left: 3px solid #16a34a;
+}
+
+.qr-stat-label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.qr-stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1e293b;
+  font-variant-numeric: tabular-nums;
+}
+
+.qr-stat-chip.high .qr-stat-value { color: #ef4444; }
+.qr-stat-chip.medium .qr-stat-value { color: #f59e0b; }
+.qr-stat-chip.low .qr-stat-value { color: #3b82f6; }
+.qr-stat-chip.p0 .qr-stat-value { color: #dc2626; }
+.qr-stat-chip.p1 .qr-stat-value { color: #ea580c; }
+.qr-stat-chip.p2 .qr-stat-value { color: #2563eb; }
+.qr-stat-chip.p3 .qr-stat-value { color: #16a34a; }
 
 /* 可折叠面板 */
 .qr-stats-collapse {
@@ -1151,17 +1365,19 @@ onMounted(() => {
   border: 1px solid #e2e8f0;
 }
 
-.qr-filter-row {
+/* 筛选字段区域 - 自适应布局 */
+.qr-filter-fields {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 4px 12px;
   width: 100%;
 }
 
-.qr-filter-row .ant-form-item {
+.qr-filter-fields .ant-form-item {
   margin-bottom: 8px;
   margin-right: 0;
+  flex-shrink: 0;
 }
 
 .qr-filter-actions-row {
@@ -1314,6 +1530,15 @@ onMounted(() => {
     justify-content: flex-start;
     flex-wrap: wrap;
   }
+
+  .qr-filter-fields .ant-form-item {
+    flex: 1 1 100%;
+  }
+
+  .qr-filter-fields .ant-form-item .ant-input,
+  .qr-filter-fields .ant-form-item .ant-select {
+    width: 100% !important;
+  }
 }
 
 /* 聊天记录弹窗样式 - 微信风格 */
@@ -1427,6 +1652,46 @@ onMounted(() => {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   cursor: pointer;
+}
+
+/* 列设置工具栏 */
+.qr-table-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.qr-column-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.qr-column-settings-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
+}
+
+/* 时间双行展示 */
+.qr-time-cell {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.4;
+}
+
+.qr-time-date {
+  font-size: 13px;
+  color: #334155;
+}
+
+.qr-time-hms {
+  font-size: 12px;
+  color: #94a3b8;
 }
 
 /* 表格风险描述列：小字体、最多两行 */

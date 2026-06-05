@@ -2,13 +2,14 @@
 """协议退费过滤服务"""
 import logging
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from app.models.database import sync_engine
 from app.models.result import RefundWhitelistPattern
-from app.services.hujing_api import get_chat_records, get_friends_batch
+from app.services.hujing_api import get_chat_friend_info, get_chat_records
 
 logger = logging.getLogger(__name__)
 
@@ -83,32 +84,52 @@ def _has_customer_message(records: list) -> bool:
     return any(record.get("author") == "left" for record in records)
 
 
+def _get_quality_friend_name(friend: dict | None) -> str:
+    """获取质检入口过滤使用的好友名来源字段。"""
+    if not friend:
+        return ""
+    return friend.get("nick") or ""
+
+
 def _should_filter_ahu_friend(friend_name: str | None) -> bool:
-    """判断好友名是否命中阿虎小号过滤规则"""
+    """判断质检结果 friend_name 字段是否命中阿虎小号过滤规则"""
     if not friend_name:
         return False
     return "阿虎" in friend_name.strip()
 
 
-def _build_friend_name_index(matched_pairs: list[tuple[str, int]]) -> dict[tuple[str, int], str]:
-    """批量构建 (user_id, friend_id) -> friend_name 映射"""
-    user_ids = sorted({user_id for user_id, _ in matched_pairs if user_id})
-    if not user_ids:
+def _build_friend_name_index(matched_pairs: list[tuple[str, int]],
+                              log_func: callable = None,
+                              batch_task_id: str = None) -> dict[int, str]:
+    """通过全局唯一 friend_id 构建 friend_id -> nick 映射"""
+    friend_ids = sorted({friend_id for _, friend_id in matched_pairs if friend_id})
+    if not friend_ids:
         return {}
 
-    friends_map = get_friends_batch(user_ids)
-    friend_name_index: dict[tuple[str, int], str] = {}
+    if log_func and batch_task_id:
+        log_func(batch_task_id, f"[过滤] 需要通过精准好友接口获取 {len(friend_ids)} 个好友昵称...", "info")
 
-    for user_id, friends in friends_map.items():
-        for friend in friends or []:
-            friend_id = friend.get("friendId")
+    friend_name_index: dict[int, str] = {}
+    max_workers = min(10, len(friend_ids))
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_friend_id = {
+            executor.submit(get_chat_friend_info, friend_id): friend_id
+            for friend_id in friend_ids
+        }
+        for future in as_completed(future_to_friend_id):
+            friend_id = future_to_friend_id[future]
             try:
-                friend_id_int = int(friend_id)
-            except (ValueError, TypeError):
+                friend_name = _get_quality_friend_name(future.result())
+            except Exception as e:
+                logger.error(f"[过滤] 获取好友 {friend_id} 昵称失败: {e}")
                 continue
 
-            friend_name = friend.get("nick") or friend.get("remark") or ""
-            friend_name_index[(user_id, friend_id_int)] = friend_name
+            if friend_name:
+                friend_name_index[friend_id] = friend_name
+
+    if log_func and batch_task_id:
+        log_func(batch_task_id, f"[过滤] 精准好友接口获取完成，共索引 {len(friend_name_index)} 个好友昵称", "info")
 
     return friend_name_index
 
@@ -220,7 +241,7 @@ def filter_matched_pairs(
 
         pair_index = _build_pair_index(all_messages)
         try:
-            friend_name_index = _build_friend_name_index(matched_pairs)
+            friend_name_index = _build_friend_name_index(matched_pairs, log_func, batch_task_id)
         except Exception as e:
             logger.error(f"[过滤] 获取好友信息失败: {e}")
             if log_func and batch_task_id:
@@ -239,11 +260,11 @@ def filter_matched_pairs(
                     log_func(batch_task_id, f"[过滤] 销售:{user_id} 好友:{friend_id} 无客户消息，已过滤", "info")
                 continue
 
-            friend_name = friend_name_index.get((user_id, friend_id))
+            friend_name = friend_name_index.get(friend_id)
             if _should_filter_ahu_friend(friend_name):
                 filtered_count += 1
                 if log_func and batch_task_id:
-                    log_func(batch_task_id, f"[过滤] 销售:{user_id} 好友:{friend_id} 好友名包含阿虎，已过滤", "info")
+                    log_func(batch_task_id, f"[过滤] 销售:{user_id} 好友:{friend_id} 好友昵称包含阿虎，已过滤", "info")
                 continue
 
             normalized = _normalize_messages(records)

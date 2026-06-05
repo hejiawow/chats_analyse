@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 from fastapi import APIRouter, Query, Depends
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
@@ -111,6 +111,8 @@ async def query_quality_check_results(
     action_type: str | None = Query(None, description="建议动作类型"),
     needs_manual_review: bool | None = Query(None, description="是否需要人工复核"),
     process_status: str | None = Query(None, description="处理状态"),
+    sort_field: str | None = Query(None, description="排序字段：created_at/action_priority/risk_level"),
+    sort_order: str | None = Query(None, description="排序方向：ascend/descend"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: dict = Depends(require_permission("read:quality_check")),
@@ -143,7 +145,33 @@ async def query_quality_check_results(
         if time_filter is not None:
             stmt = stmt.where(time_filter)
 
-        stmt = stmt.order_by(QualityCheckResult.created_at.desc())
+        # 动态排序
+        if sort_field == "action_priority":
+            priority_order = case(
+                (QualityCheckResult.action_priority == "P0", 1),
+                (QualityCheckResult.action_priority == "P1", 2),
+                (QualityCheckResult.action_priority == "P2", 3),
+                (QualityCheckResult.action_priority == "P3", 4),
+                else_=5,
+            )
+            stmt = stmt.order_by(priority_order.asc() if sort_order == "ascend" else priority_order.desc())
+        elif sort_field == "risk_level":
+            effective_risk = func.coalesce(
+                QualityCheckResult.modified_risk_level,
+                QualityCheckResult.risk_level
+            )
+            risk_order = case(
+                (effective_risk == "high", 1),
+                (effective_risk == "medium", 2),
+                (effective_risk == "low", 3),
+                (effective_risk == "none", 4),
+                else_=5,
+            )
+            stmt = stmt.order_by(risk_order.asc() if sort_order == "ascend" else risk_order.desc())
+        elif sort_field == "created_at" and sort_order == "ascend":
+            stmt = stmt.order_by(QualityCheckResult.created_at.asc())
+        else:
+            stmt = stmt.order_by(QualityCheckResult.created_at.desc())
 
         # 总数（需同样的 JOIN）
         count_stmt = select(func.count()).select_from(
@@ -203,6 +231,12 @@ async def get_quality_check_stats(
     friend_id: int | None = Query(None, description="好友ID"),
     trigger_party: str | None = Query(None, description="触发方：sales/customer/both"),
     keyword: str | None = Query(None, description="关键词"),
+    keywords: List[str] = Query(None, alias="keywords[]", description="关键词列表"),
+    action_priority: str | None = Query(None, description="处理优先级：P0/P1/P2/P3"),
+    recommended_owner: str | None = Query(None, description="建议责任方"),
+    action_type: str | None = Query(None, description="建议动作类型"),
+    needs_manual_review: bool | None = Query(None, description="是否需要人工复核"),
+    process_status: str | None = Query(None, description="处理状态"),
     start_time: str | None = Query(None, description="开始时间（YYYY-MM-DD HH:mm:ss）"),
     end_time: str | None = Query(None, description="结束时间（YYYY-MM-DD HH:mm:ss）"),
     current_user: dict = Depends(require_permission("read:quality_check")),
@@ -214,9 +248,17 @@ async def get_quality_check_stats(
     """
     # 筛选条件
     user_id_filter = user_id if user_id else None
+    keyword_values = list(keywords or [])
+    if keyword:
+        keyword_values.append(keyword)
 
     # 判断是否有筛选条件（影响缓存策略）
-    has_filters = user_id_filter or friend_id or trigger_party or keyword or start_time or end_time
+    has_filters = (
+        user_id_filter or friend_id or trigger_party or keyword_values
+        or action_priority or recommended_owner or action_type
+        or needs_manual_review is not None or process_status
+        or start_time or end_time
+    )
 
     # 缓存策略：无筛选条件时使用缓存，有筛选条件时不缓存
     cache_key = _STATS_CACHE_KEY
@@ -245,8 +287,15 @@ async def get_quality_check_stats(
             count_stmt = count_stmt.where(QualityCheckResult.friend_id == friend_id)
         if trigger_party:
             count_stmt = count_stmt.where(QualityCheckResult.trigger_party == trigger_party)
-        if keyword:
-            count_stmt = count_stmt.where(QualityCheckResult.detected_keywords.ilike(f"%{escape_like_pattern(keyword)}%", escape="\\"))
+        count_stmt = _build_risk_keyword_filter(count_stmt, None, keyword_values)
+        count_stmt = _apply_processing_filters(
+            count_stmt,
+            action_priority,
+            recommended_owner,
+            action_type,
+            needs_manual_review,
+            process_status,
+        )
         if time_filter is not None:
             count_stmt = count_stmt.where(time_filter)
         total = await session.scalar(count_stmt)
@@ -271,12 +320,48 @@ async def get_quality_check_stats(
             risk_stmt = risk_stmt.where(QualityCheckResult.friend_id == friend_id)
         if trigger_party:
             risk_stmt = risk_stmt.where(QualityCheckResult.trigger_party == trigger_party)
-        if keyword:
-            risk_stmt = risk_stmt.where(QualityCheckResult.detected_keywords.ilike(f"%{escape_like_pattern(keyword)}%", escape="\\"))
+        risk_stmt = _build_risk_keyword_filter(risk_stmt, None, keyword_values)
+        risk_stmt = _apply_processing_filters(
+            risk_stmt,
+            action_priority,
+            recommended_owner,
+            action_type,
+            needs_manual_review,
+            process_status,
+        )
         if time_filter is not None:
             risk_stmt = risk_stmt.where(time_filter)
         risk_result = await session.execute(risk_stmt)
         risk_distribution = {row.risk_level or "none": row.count for row in risk_result}
+
+        # 优先级分布统计
+        priority_stmt = select(
+            QualityCheckResult.action_priority.label("priority"),
+            func.count().label("count")
+        ).select_from(
+            QualityCheckResult
+        ).outerjoin(
+            QualityCheckTask, QualityCheckResult.task_id == QualityCheckTask.id
+        ).group_by(QualityCheckResult.action_priority)
+        if user_id_filter:
+            priority_stmt = priority_stmt.where(QualityCheckResult.user_id == user_id_filter)
+        if friend_id is not None:
+            priority_stmt = priority_stmt.where(QualityCheckResult.friend_id == friend_id)
+        if trigger_party:
+            priority_stmt = priority_stmt.where(QualityCheckResult.trigger_party == trigger_party)
+        priority_stmt = _build_risk_keyword_filter(priority_stmt, None, keyword_values)
+        priority_stmt = _apply_processing_filters(
+            priority_stmt,
+            action_priority,
+            recommended_owner,
+            action_type,
+            needs_manual_review,
+            process_status,
+        )
+        if time_filter is not None:
+            priority_stmt = priority_stmt.where(time_filter)
+        priority_result = await session.execute(priority_stmt)
+        priority_distribution = {row.priority or "unknown": row.count for row in priority_result}
 
         # 关键词频次统计
         keyword_stmt = select(QualityCheckResult.detected_keywords).select_from(
@@ -290,8 +375,15 @@ async def get_quality_check_stats(
             keyword_stmt = keyword_stmt.where(QualityCheckResult.friend_id == friend_id)
         if trigger_party:
             keyword_stmt = keyword_stmt.where(QualityCheckResult.trigger_party == trigger_party)
-        if keyword:
-            keyword_stmt = keyword_stmt.where(QualityCheckResult.detected_keywords.ilike(f"%{escape_like_pattern(keyword)}%", escape="\\"))
+        keyword_stmt = _build_risk_keyword_filter(keyword_stmt, None, keyword_values)
+        keyword_stmt = _apply_processing_filters(
+            keyword_stmt,
+            action_priority,
+            recommended_owner,
+            action_type,
+            needs_manual_review,
+            process_status,
+        )
         if time_filter is not None:
             keyword_stmt = keyword_stmt.where(time_filter)
         keyword_result = await session.execute(keyword_stmt)
@@ -313,6 +405,7 @@ async def get_quality_check_stats(
         result = {
             "total": total,
             "risk_distribution": risk_distribution,
+            "priority_distribution": priority_distribution,
             "keyword_frequency": keyword_frequency,
         }
 
