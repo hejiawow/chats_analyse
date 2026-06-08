@@ -107,6 +107,8 @@ temp/
 .sc/
 .codegraph/
 docs/superpowers/
+.lanes/
+
 
 # Migration scripts (development only)
 migrate_*.py
