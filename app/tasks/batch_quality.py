@@ -7,7 +7,7 @@ from celery import chord
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
-from app.services.hujing_api import get_chat_pairs, get_chat_records, get_all_chat_messages, get_all_sales, get_friends_list, get_chat_records_for_quality_check
+from app.services.hujing_api import get_chat_pairs, get_chat_records, get_all_chat_messages, get_all_sales, get_chat_records_for_quality_check, get_friends_by_ids
 from app.agents.quality_check import quality_check_agent
 from app.models.database import sync_engine
 from app.models.result import QualityCheckResult, QualityCheckDetail, QualityCheckTask
@@ -54,39 +54,6 @@ def _get_sales_map() -> dict:
 def _get_user_name(user_id: str) -> str | None:
     """根据 user_id 获取销售姓名"""
     return _get_sales_map().get(user_id)
-
-def _get_friend_name(user_id: str, friend_id: int) -> str | None:
-    """根据 user_id 和 friend_id 获取好友姓名"""
-    friends_list = get_friends_list(user_id)
-    for f in friends_list:
-        if f.get("friendId") == friend_id:
-            return f.get("nick") or f.get("remark") or None
-    return None
-
-
-def _get_friend_info(user_id: str, friend_id: int) -> dict:
-    """根据 user_id 和 friend_id 获取好友详细信息
-
-    Returns:
-        dict: 包含 friend_name, chat_title, alias, phone, remark_phone
-    """
-    friends_list = get_friends_list(user_id)
-    for f in friends_list:
-        if f.get("friendId") == friend_id:
-            return {
-                "friend_name": f.get("nick") or f.get("remark") or None,
-                "chat_title": f.get("remark") or None,
-                "alias": f.get("alias") or None,
-                "phone": f.get("phone") or None,
-                "remark_phone": f.get("remarkPhone") or None,
-            }
-    return {
-        "friend_name": None,
-        "chat_title": None,
-        "alias": None,
-        "phone": None,
-        "remark_phone": None,
-    }
 
 
 def _quality_result_kwargs(result: dict) -> dict:
@@ -293,7 +260,9 @@ def run_single_batch_check(self, batch_task_id: str, db_task_id: int, user_id: s
         # 只有检测到关键词才保存到数据库
         if result.get("keyword_detected") == "yes":
             user_name = _get_user_name(user_id)
-            friend_info = _get_friend_info(user_id, friend_id)
+            # 使用 get_friends_by_ids 获取好友信息（带缓存）
+            friend_info_map = get_friends_by_ids([friend_id])
+            friend_info = friend_info_map.get(friend_id, {})
             with Session(sync_engine) as session:
                 # 保存主表记录（不含大字段）
                 record = QualityCheckResult(
@@ -459,7 +428,7 @@ def run_batch_quality_check(self, batch_task_id: str, start_time: str, end_time:
 
 @celery_app.task(bind=True, name="app.tasks.batch_quality.run_single_check_for_matched_pair")
 def run_single_check_for_matched_pair(self, batch_task_id: str, db_task_id: int, user_id: str, friend_id: int,
-                                      start_time: str, end_time: str):
+                                      start_time: str, end_time: str, friend_info: dict = None):
     """处理单个匹配到关键词的销售-好友对"""
     # 检查任务是否被取消
     if is_batch_cancelled(batch_task_id):
@@ -508,18 +477,36 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, db_task_id: int,
         if result.get("keyword_detected") == "yes":
             _log(batch_task_id, f"[风险] 销售:{user_id} 好友:{friend_id} 检测到关键词: {result.get('detected_keywords')}, 风险等级: {result.get('risk_level')}", "info")
             user_name = _get_user_name(user_id)
-            friend_info = _get_friend_info(user_id, friend_id)
+
+            # 优先使用传入的好友信息，若无则回退到批量获取单个好友
+            if friend_info:
+                friend_name = friend_info.get("friend_name")
+                chat_title = friend_info.get("chat_title")
+                alias = friend_info.get("alias")
+                phone = friend_info.get("phone")
+                remark_phone = friend_info.get("remark_phone")
+            else:
+                # 回退：调用 get_friends_by_ids 获取单个好友信息（带缓存）
+                _log(batch_task_id, f"[回退] 销售:{user_id} 好友:{friend_id} 从API获取好友信息", "info")
+                friend_info_map = get_friends_by_ids([friend_id])
+                friend_info_dict = friend_info_map.get(friend_id, {})
+                friend_name = friend_info_dict.get("friend_name")
+                chat_title = friend_info_dict.get("chat_title")
+                alias = friend_info_dict.get("alias")
+                phone = friend_info_dict.get("phone")
+                remark_phone = friend_info_dict.get("remark_phone")
+
             with Session(sync_engine) as session:
                 # 保存主表记录（不含大字段）
                 record = QualityCheckResult(
                     user_id=user_id,
                     user_name=user_name,
                     friend_id=friend_id,
-                    friend_name=friend_info.get("friend_name"),
-                    chat_title=friend_info.get("chat_title"),
-                    alias=friend_info.get("alias"),
-                    phone=friend_info.get("phone"),
-                    remark_phone=friend_info.get("remark_phone"),
+                    friend_name=friend_name,
+                    chat_title=chat_title,
+                    alias=alias,
+                    phone=phone,
+                    remark_phone=remark_phone,
                     chat_record_count=result.get("chat_record_count", len(chat_records)),
                     task_id=db_task_id,
                     created_at=now_shanghai(),
@@ -695,10 +682,11 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
     _log(batch_task_id, f"[匹配] 发现 {len(matched_pairs)} 个匹配关键词的销售-好友对", "info")
 
     # 4. 质检过滤规则（无客户消息 / 阿虎好友名 / 协议退费）
+    # 同时获取好友信息，供子任务复用
     _log(batch_task_id, "[过滤] 正在执行质检过滤规则...", "info")
     from app.services.refund_filter import filter_matched_pairs
 
-    filtered_pairs = filter_matched_pairs(matched_pairs, start_time, end_time, batch_task_id, _log, all_messages=all_messages)
+    filtered_pairs, friend_info_index = filter_matched_pairs(matched_pairs, start_time, end_time, batch_task_id, _log, all_messages=all_messages)
 
     filtered_count = len(matched_pairs) - len(filtered_pairs)
     if filtered_count > 0:
@@ -719,12 +707,17 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
 
     _log(batch_task_id, f"[分发] 开始分发 {len(matched_pairs)} 个子任务...", "info")
 
-    # 6. 初始化进度
+    # 6. 好友信息已在过滤阶段获取，直接复用
+    if friend_info_index:
+        _log(batch_task_id, f"[好友信息] 复用过滤阶段获取的 {len(friend_info_index)} 个好友信息", "info")
+    else:
+        _log(batch_task_id, "[好友信息] 过滤阶段未获取好友信息，子任务将回退到逐个获取", "warning")
+
+    # 7. 初始化进度
     update_batch_progress(batch_task_id, 0, len(matched_pairs), "running")
     _update_task_status(batch_task_id, total_pairs=len(matched_pairs), filtered_count=filtered_count)
-    _log(batch_task_id, f"[分发] 开始分发 {len(matched_pairs)} 个子任务...", "info")
 
-    # 7. 创建子任务列表
+    # 8. 创建子任务列表（传递好友信息）
     subtasks = [
         run_single_check_for_matched_pair.s(
             batch_task_id,
@@ -733,11 +726,12 @@ def run_batch_quality_check_by_messages(self, batch_task_id: str, start_time: st
             pair[1],  # friend_id
             start_time,
             end_time,
+            friend_info_index.get(pair[1]),  # 传入好友信息（复用过滤阶段获取的）
         )
         for pair in matched_pairs
     ]
 
-    # 8. 使用 chord：子任务完成后自动触发回调
+    # 9. 使用 chord：子任务完成后自动触发回调
     callback = on_batch_complete.s(batch_task_id)
     chord(subtasks)(callback)
 

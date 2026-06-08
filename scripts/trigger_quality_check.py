@@ -5,25 +5,55 @@
 通过 Celery 提交 run_batch_quality_check_by_messages 任务，
 CLI 快速退出，适合 crontab 定时调度。
 
+时间范围指定方式（四选一）：
+    1. --hours X       扫描过去 X 小时的聊天记录（相对当前时刻，推荐配合 crontab 使用）
+    2. --minutes X     扫描过去 X 分钟的聊天记录（相对当前时刻）
+    3. --days N        扫描过去 N 个完整天的聊天记录（绝对日期：N天前 00:00:00 ~ 昨天 23:59:59）
+    4. --start-time / --end-time   显式指定开始和结束时间
+
 使用方式：
     # 默认：过去 24 小时全量扫描
     python scripts/trigger_quality_check.py
 
-    # 指定时间范围
+    # 扫描过去 1 小时
+    python scripts/trigger_quality_check.py --hours 1
+
+    # 扫描过去 30 分钟
+    python scripts/trigger_quality_check.py --minutes 30
+
+    # 扫描昨天整天（昨天 00:00:00 ~ 昨天 23:59:59）
+    python scripts/trigger_quality_check.py --days 1
+
+    # 扫描过去 3 个完整天（3天前 00:00:00 ~ 昨天 23:59:59）
+    python scripts/trigger_quality_check.py --days 3
+
+    # 显式指定时间范围
     python scripts/trigger_quality_check.py --start-time "2026-06-01 00:00:00" --end-time "2026-06-01 23:59:59"
 
     # 筛选特定销售
-    python scripts/trigger_quality_check.py --user-id "sales_001"
+    python scripts/trigger_quality_check.py --hours 1 --user-id "sales_001"
 
     # 模拟运行（不实际提交）
-    python scripts/trigger_quality_check.py --dry-run
+    python scripts/trigger_quality_check.py --days 1 --dry-run
 
     # 强制提交（跳过锁检查）
-    python scripts/trigger_quality_check.py --force
+    python scripts/trigger_quality_check.py --hours 1 --force
 
 Crontab 配置示例：
-    # 每小时整点执行
-    0 * * * * cd /opt/chats_analyse && docker compose exec -T worker python scripts/trigger_quality_check.py >> /var/log/quality_check_cron.log 2>&1
+    # 每小时整点执行，扫描过去 1 小时
+    0 * * * * cd /opt/chats_analyse && docker compose exec -T worker python scripts/trigger_quality_check.py --hours 1 >> /var/log/quality_check_cron.log 2>&1
+
+    # 每 30 分钟执行，扫描过去 30 分钟
+    */30 * * * * cd /opt/chats_analyse && docker compose exec -T worker python scripts/trigger_quality_check.py --minutes 30 >> /var/log/quality_check_cron.log 2>&1
+
+    # 每天凌晨 2 点，扫描昨天整天
+    0 2 * * * cd /opt/chats_analyse && docker compose exec -T worker python scripts/trigger_quality_check.py --days 1 >> /var/log/quality_check_cron.log 2>&1
+
+    # 每周一凌晨 3 点，扫描过去 7 天
+    0 3 * * 1 cd /opt/chats_analyse && docker compose exec -T worker python scripts/trigger_quality_check.py --days 7 >> /var/log/quality_check_cron.log 2>&1
+
+    # 每 2 小时执行，扫描过去 2 小时
+    0 */2 * * * cd /opt/chats_analyse && docker compose exec -T worker python scripts/trigger_quality_check.py --hours 2 >> /var/log/quality_check_cron.log 2>&1
 """
 import os
 import sys
@@ -83,13 +113,31 @@ def build_parser():
         "--start-time",
         type=str,
         default=None,
-        help="检测开始时间，格式 'YYYY-MM-DD HH:MM:SS'，默认过去 24 小时",
+        help="检测开始时间，格式 'YYYY-MM-DD HH:MM:SS'（显式指定，优先级最高）",
     )
     parser.add_argument(
         "--end-time",
         type=str,
         default=None,
-        help="检测结束时间，格式 'YYYY-MM-DD HH:MM:SS'，默认当前时间",
+        help="检测结束时间，格式 'YYYY-MM-DD HH:MM:SS'（显式指定，优先级最高）",
+    )
+    parser.add_argument(
+        "--hours",
+        type=float,
+        default=None,
+        help="扫描过去 X 小时的聊天记录（相对当前时刻，与 --minutes/--days 互斥）",
+    )
+    parser.add_argument(
+        "--minutes",
+        type=float,
+        default=None,
+        help="扫描过去 X 分钟的聊天记录（相对当前时刻，与 --hours/--days 互斥）",
+    )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="扫描过去 N 个完整天（绝对日期：N天前 00:00:00 ~ 昨天 23:59:59，与 --hours/--minutes 互斥）",
     )
     parser.add_argument(
         "--user-id",
@@ -116,20 +164,69 @@ def build_parser():
     return parser
 
 
+def compute_time_range(args):
+    """计算时间范围，优先级：显式 start/end > days > hours > minutes > 默认 24h"""
+    now = datetime.now()
+    fmt = "%Y-%m-%d %H:%M:%S"
+
+    # 优先级 1：显式指定 start-time / end-time
+    if args.start_time or args.end_time:
+        end_time = args.end_time or now.strftime(fmt)
+        start_time = args.start_time or (now - timedelta(hours=24)).strftime(fmt)
+        return start_time, end_time, "显式指定"
+
+    # 优先级 2：--days（绝对完整天：N天前 00:00:00 ~ 昨天 23:59:59）
+    if args.days is not None:
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_time = (today - timedelta(days=args.days)).strftime(fmt)
+        end_time = (today - timedelta(seconds=1)).strftime(fmt)
+        if args.days == 1:
+            label = "昨天整天"
+        else:
+            label = f"过去 {args.days} 天（{start_time} ~ {end_time}）"
+        return start_time, end_time, label
+
+    # 优先级 3：--hours
+    if args.hours is not None:
+        end_time = now.strftime(fmt)
+        start_time = (now - timedelta(hours=args.hours)).strftime(fmt)
+        return start_time, end_time, f"过去 {args.hours} 小时"
+
+    # 优先级 4：--minutes
+    if args.minutes is not None:
+        end_time = now.strftime(fmt)
+        start_time = (now - timedelta(minutes=args.minutes)).strftime(fmt)
+        return start_time, end_time, f"过去 {args.minutes} 分钟"
+
+    # 优先级 5：默认过去 24 小时
+    end_time = now.strftime(fmt)
+    start_time = (now - timedelta(hours=24)).strftime(fmt)
+    return start_time, end_time, "默认过去 24 小时"
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
 
+    # 互斥检查：--hours / --minutes / --days 只能选其一
+    time_flags = sum([
+        args.hours is not None,
+        args.minutes is not None,
+        args.days is not None,
+    ])
+    if time_flags > 1:
+        _log("[错误] --hours / --minutes / --days 不能同时使用，请选择其一")
+        return 1
+
     # 计算时间范围
-    now = datetime.now()
-    end_time = args.end_time or now.strftime("%Y-%m-%d %H:%M:%S")
-    start_time = args.start_time or (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+    start_time, end_time, time_mode = compute_time_range(args)
 
     user_label = args.user_id or "全部"
 
     # dry-run 模式
     if args.dry_run:
         _log("[DRY-RUN] 模拟提交批量质检任务")
+        print(f"  时间模式:   {time_mode}")
         print(f"  时间范围:   {start_time} ~ {end_time}")
         print(f"  销售筛选:   {user_label}")
         print(f"  最大数量:   {args.limit}")
@@ -186,6 +283,7 @@ def main():
 
     _log("批量质检任务已提交")
     print(f"  task_id:    {task_id}")
+    print(f"  时间模式:   {time_mode}")
     print(f"  时间范围:   {start_time} ~ {end_time}")
     print(f"  销售筛选:   {user_label}")
     print(f"  最大数量:   {args.limit}")
