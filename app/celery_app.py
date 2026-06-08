@@ -21,8 +21,8 @@ celery_app.conf.update(
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     # 任务超时设置
-    task_time_limit=300,  # 单个任务最大执行时间（秒），超时会被强制终止
-    task_soft_time_limit=280,  # 单个任务软超时时间（秒），超时时发送信号
+    task_time_limit=600,  # 单个任务最大执行时间（秒），超时会被强制终止
+    task_soft_time_limit=550,  # 单个任务软超时时间（秒），超时时发送信号
     # 定时任务配置
     beat_schedule={
         "flush-logs-every-30-seconds": {
