@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """质检智能体 — 关键词预检测 + AI深度分析"""
 import json
+import time
 from datetime import datetime, timedelta
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -290,15 +291,29 @@ def _ai_deep_analysis(chat_records: list, keyword_matches: list) -> dict:
             parsed["raw_response"] = raw_response
             return parsed
 
+
         except Exception as e:
             last_error = str(e)
-            # 如果是 429 错误，继续重试
-            if "429" in last_error and retry < max_retries - 1:
-                print(f"AI call failed with 429, retrying ({retry + 1}/{max_retries})...")
+            error_type = type(e).__name__
+            # 如果是 429 或 超时错误，继续重试
+            is_rate_limit = (
+                    "429" in last_error or
+                    "RateLimitError" in error_type or
+                    "rate_limit" in last_error.lower()
+            )
+            is_timeout = (
+                    "timeout" in last_error.lower() or
+                    "TimeoutError" in error_type or
+                    "ReadTimeout" in error_type or
+                    "ConnectTimeout" in error_type or
+                    "timed out" in last_error.lower()
+            )
+            if (is_rate_limit or is_timeout) and retry < max_retries - 1:
+                wait_time = 2 ** retry  # 指数退避：1s, 2s, 4s
+                print(f"AI call failed ({'rate limit' if is_rate_limit else 'timeout'}), retrying ({retry + 1}/{max_retries}) after{wait_time}s...")
+                time.sleep(wait_time)
                 continue
-            # 其他错误或最后一次重试失败，返回错误
             break
-
     # 所有重试都失败
     result = _normalize_quality_result({
         "risk_level": "unknown",

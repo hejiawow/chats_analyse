@@ -45,7 +45,7 @@ class Settings(BaseSettings):
 
     # AI Concurrency Control (分布式信号量限制并发调用)
     AI_MAX_CONCURRENT: int = 2  # 最大并发 AI 调用数（免费版 DashScope 只允许 1）
-    AI_SEMAPHORE_TIMEOUT: int = 300  # 获取信号量超时时间（秒）
+    AI_SEMAPHORE_TIMEOUT: int = 360  # 获取信号量超时时间（秒）
 
     # 质检检测聊天记录配置
     QUALITY_CHECK_CHAT_DAYS: int = 7  # 质检检测默认往前查询天数

@@ -20,7 +20,7 @@ class AISemaphore:
     _logger = logging.getLogger(__name__)
 
     SEMAPHORE_KEY = "ai:semaphore"
-    SEMAPHORE_TTL = 300  # 5 minutes TTL for safety cleanup
+    SEMAPHORE_TTL = 400  # 5 minutes TTL for safety cleanup
 
     def __init__(self, max_concurrent: int = 2, timeout: int = 300):
         """
