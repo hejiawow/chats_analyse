@@ -29,6 +29,8 @@ services:
     ports:
       - "127.0.0.1:8010:8000"
     env_file: .env
+    environment:
+      - TZ=Asia/Shanghai
     depends_on:
       - redis
       - postgres
@@ -38,6 +40,8 @@ services:
     build: .
     command: celery -A app.celery_app worker --loglevel=info --concurrency=10
     env_file: .env
+    environment:
+      - TZ=Asia/Shanghai
     depends_on:
       - redis
       - postgres
