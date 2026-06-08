@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.models.database import init_db, async_engine
-from app.api import query, referral_query, case_query, script_lib, rag_query, sales_journey_query, follow_up_query, auth, users, roles, quality_check_query, keyword_config, logs, refund_whitelist_query
+from app.api import query, referral_query, case_query, script_lib, rag_query, sales_journey_query, follow_up_query, auth, users, roles, quality_check_query, keyword_config, logs, refund_whitelist_query, quality_review
 from app.tasks.analysis import run_analysis
 from app.services.log_service import get_task_logs, clear_task_logs, is_task_done
 from app.models.result import SalesJourneyResult  # ensure table creation
@@ -132,6 +132,7 @@ app.include_router(follow_up_query.router, prefix="/api", tags=["督学跟进合
 app.include_router(script_lib.router, prefix="/api", tags=["话术库"])
 app.include_router(rag_query.router, prefix="/api", tags=["RAG问答"])
 app.include_router(quality_check_query.router, prefix="/api", tags=["质检检测"])
+app.include_router(quality_review.router, prefix="/api", tags=["质检二次审查"])
 app.include_router(keyword_config.router, prefix="/api", tags=["关键词配置"])
 app.include_router(logs.router, prefix="/api", tags=["日志管理"])
 # TODO: 退费白名单路由 — 待 app/api/refund_whitelist_query.py 模块实现后启用

@@ -191,6 +191,16 @@
 
     <!-- 列设置 -->
     <div class="qr-table-toolbar">
+      <!-- 批量操作 -->
+      <a-space v-if="selectedRowKeys.length > 0" style="margin-right: 16px">
+        <a-button
+          type="primary"
+          @click="handleBatchReview"
+          :loading="batchReviewing"
+        >
+          批量二次审查 ({{ selectedRowKeys.length }}条)
+        </a-button>
+      </a-space>
       <a-popover
         v-model:open="columnSettingsOpen"
         title="列显示设置"
@@ -226,7 +236,12 @@
       row-key="id"
       size="small"
       @change="handleTableChange"
-      :scroll="{ x: 'max-content' }" 
+      :scroll="{ x: 'max-content' }"
+      :rowSelection="{
+        selectedRowKeys: selectedRowKeys,
+        onChange: onSelectChange,
+        getCheckboxProps: getCheckboxProps,
+      }"
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'created_at'">
@@ -290,12 +305,25 @@
             {{ getProcessStatusText(record.process_status) }}
           </a-tag>
         </template>
+        <template v-if="column.key === 'has_secondary_review'">
+          <a-tag v-if="record.has_secondary_review" color="green">已审查</a-tag>
+          <a-tag v-else color="default">未审查</a-tag>
+        </template>
         <template v-if="column.key === 'remark'">
           <span :title="record.remark">{{ record.remark || '-' }}</span>
         </template>
         <template v-if="column.key === 'actions'">
           <a-button size="small" type="link" @click="showDetail(record)">详情</a-button>
           <a-button size="small" type="link" @click="showEdit(record)">编辑</a-button>
+          <a-button
+            v-if="canReview(record)"
+            size="small"
+            type="primary"
+            @click="handleInstantReview(record)"
+            :loading="record.reviewing"
+          >
+            申请二次审查
+          </a-button>
         </template>
       </template>
     </a-table>
@@ -550,6 +578,7 @@ import { message } from 'ant-design-vue'
 import { SettingOutlined } from '@ant-design/icons-vue'
 import * as echarts from 'echarts'
 import { getQualityCheckList, getQualityCheckStats, exportQualityCheckResults, getActiveKeywords, getQualityCheckChatRecords, updateQualityCheckResult, getQualityCheckModificationLogs, getQualityCheckDetail } from '@/api/qualitycheck'
+import { instantReview, batchReview } from '@/api/qualityreview'
 
 // 关键词缓存配置
 const KEYWORDS_CACHE_KEY = 'qc_keywords_cache'
@@ -630,6 +659,7 @@ const allColumns = [
   { title: '处理状态', key: 'process_status', minWidth: 100 },
   { title: '检测关键词', key: 'detected_keywords', minWidth: 150, ellipsis: true },
   { title: '风险类别', dataIndex: 'risk_category', key: 'risk_category', minWidth: 100 },
+  { title: '二次审查', dataIndex: 'has_secondary_review', key: 'has_secondary_review', width: 100 },
   { title: '备注', dataIndex: 'remark', key: 'remark', width: 150, ellipsis: true },
   { title: '操作', key: 'actions', width: 110, fixed: 'right' },
 ]
@@ -724,6 +754,10 @@ const chatRecordsTimeRange = ref(null)
 const modificationLogsVisible = ref(false)
 const modificationLogsLoading = ref(false)
 const modificationLogsData = ref([])
+
+// 批量审查
+const selectedRowKeys = ref([])
+const batchReviewing = ref(false)
 
 // 风险等级映射
 function getRiskColor(level) {
@@ -851,6 +885,58 @@ const getProcessStatusText = (status) => {
     escalated: '已升级'
   }
   return textMap[status] || '未定'
+}
+
+// 二次审查相关函数
+function canReview(record) {
+  // 仅高中风险且未审查的结果可以审查
+  const effectiveRisk = record.display_risk_level || record.risk_level
+  return (effectiveRisk === 'high' || effectiveRisk === 'medium') && !record.has_secondary_review
+}
+
+async function handleInstantReview(record) {
+  record.reviewing = true
+  try {
+    const res = await instantReview(record.id)
+    message.success('二次审查完成')
+    // 刷新数据
+    loadData()
+    // 可选：直接显示审查结果
+    console.log('审查结果:', res)
+  } catch (error) {
+    message.error(error.response?.data?.detail || '二次审查失败')
+  } finally {
+    record.reviewing = false
+  }
+}
+
+function onSelectChange(keys) {
+  selectedRowKeys.value = keys
+}
+
+function getCheckboxProps(record) {
+  return {
+    disabled: !canReview(record),
+  }
+}
+
+async function handleBatchReview() {
+  if (selectedRowKeys.value.length === 0) {
+    message.warning('请选择要审查的结果')
+    return
+  }
+
+  batchReviewing.value = true
+  try {
+    const res = await batchReview(selectedRowKeys.value)
+    message.success(res.message)
+    selectedRowKeys.value = []
+    loadData()
+  } catch (error) {
+    message.error(error.response?.data?.detail || '批量审查失败')
+  } finally {
+    batchReviewing.value = false
+  }
 }
 
 // 加载统计（响应筛选条件，但不包括风险等级）

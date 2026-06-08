@@ -76,6 +76,8 @@ const allPermissions = [
   { value: 'read:followup', label: '查看督学合规' },
   { value: 'read:quality_check', label: '查看质检结果' },
   { value: 'write:quality_check', label: '触发质检分析' },
+  { value: 'read:quality_review', label: '查看二次审查结果' },
+  { value: 'write:quality_review', label: '执行二次审查操作' },
   { value: 'read:scriptlib', label: '查看话术库' },
   { value: 'write:scriptlib', label: '存入话术库' },
   { value: 'read:rag', label: '使用RAG问答' },

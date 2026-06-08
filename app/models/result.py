@@ -328,6 +328,7 @@ class QualityCheckResult(Base):
     needs_manual_review = Column(Boolean, default=False, comment="是否需要人工复核")
     confidence = Column(Float, nullable=True, comment="AI置信度：0到1")
     process_status = Column(String(32), default="pending", comment="处理状态：pending/processing/resolved/false_positive/escalated")
+    has_secondary_review = Column(Boolean, default=False, comment="是否已进行二次审查")
 
     # === 状态 ===
     status = Column(String(16), default="success", comment="success/failed/no_chat/no_keyword")
@@ -371,6 +372,7 @@ class QualityCheckResult(Base):
             "needs_manual_review": self.needs_manual_review,
             "confidence": self.confidence,
             "process_status": self.process_status,
+            "has_secondary_review": self.has_secondary_review,
             "status": self.status,
             "error_msg": self.error_msg,
             "task_id": self.task_id,
@@ -477,4 +479,60 @@ class QualityCheckDetail(Base):
 
     __table_args__ = (
         Index("ix_quality_check_detail_result_id", "result_id"),
+    )
+
+
+class QualityReviewResult(Base):
+    """质检二次审查结果表"""
+    __tablename__ = "quality_review_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    result_id = Column(Integer, ForeignKey("quality_check_results.id", ondelete="CASCADE"), nullable=False, comment="关联质检结果ID")
+
+    # 二次审查核心字段
+    confirmed = Column(Boolean, nullable=True, comment="是否确认涉及退费或投诉")
+    risk_type = Column(String(16), nullable=True, comment="风险类型：退费/投诉/其他")
+    priority = Column(String(8), nullable=True, comment="优先级：P0/P1/P2/P3")
+    first_mention_time = Column(String(64), nullable=True, comment="客户首次提出退费或投诉的时间")
+    secondary_risk_level = Column(String(16), nullable=False, comment="二次风险等级：high/medium/low/none")
+    review_reason = Column(Text, nullable=True, comment="二次判断理由")
+    suggested_action = Column(String(128), nullable=True, comment="建议处理动作")
+    confidence = Column(Float, nullable=True, comment="AI置信度：0到1")
+
+    # 状态字段
+    review_status = Column(String(16), default="pending", comment="审查状态：pending/completed/failed")
+
+    # 元数据
+    review_mode = Column(String(16), nullable=True, comment="审查模式：instant/batch")
+    batch_id = Column(String(64), nullable=True, comment="批次号（批量审查时）")
+    error_msg = Column(Text, nullable=True, comment="失败原因")
+
+    # 时间
+    created_at = Column(DateTime, default=lambda: now_shanghai(), comment="创建时间")
+    completed_at = Column(DateTime, nullable=True, comment="完成时间")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "result_id": self.result_id,
+            "confirmed": self.confirmed,
+            "risk_type": self.risk_type,
+            "priority": self.priority,
+            "first_mention_time": self.first_mention_time,
+            "secondary_risk_level": self.secondary_risk_level,
+            "review_reason": self.review_reason,
+            "suggested_action": self.suggested_action,
+            "confidence": self.confidence,
+            "review_status": self.review_status,
+            "review_mode": self.review_mode,
+            "batch_id": self.batch_id,
+            "error_msg": self.error_msg,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+        }
+
+    __table_args__ = (
+        Index("ix_quality_review_result_id", "result_id"),
+        Index("ix_quality_review_status", "review_status"),
+        Index("ix_quality_review_batch_id", "batch_id"),
     )
