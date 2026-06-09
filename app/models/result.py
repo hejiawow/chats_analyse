@@ -506,6 +506,7 @@ class QualityReviewResult(Base):
     review_mode = Column(String(16), nullable=True, comment="审查模式：instant/batch")
     batch_id = Column(String(64), nullable=True, comment="批次号（批量审查时）")
     error_msg = Column(Text, nullable=True, comment="失败原因")
+    retry_count = Column(Integer, default=0, comment="重试次数")
 
     # 时间
     created_at = Column(DateTime, default=lambda: now_shanghai(), comment="创建时间")
@@ -527,6 +528,7 @@ class QualityReviewResult(Base):
             "review_mode": self.review_mode,
             "batch_id": self.batch_id,
             "error_msg": self.error_msg,
+            "retry_count": self.retry_count or 0,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
         }

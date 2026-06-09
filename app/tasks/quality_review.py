@@ -12,6 +12,9 @@ from app.agents.quality_review import quality_review_agent
 from app.services.hujing_api import get_chat_records_for_quality_check
 from config import now_shanghai, to_naive_shanghai
 
+# Task层最大重试次数，超过后标记为已审查不再重试
+MAX_TASK_RETRIES = 5
+
 
 @shared_task(bind=True, name="batch_quality_review")
 def batch_quality_review_task(self, result_ids: list, batch_id: str):
@@ -95,54 +98,139 @@ def batch_quality_review_task(self, result_ids: list, batch_id: str):
                       f"confirmed={review_result.get('confirmed')}, risk_type={review_result.get('risk_type')}, "
                       f"priority={review_result.get('priority')}")
 
-                # 保存审查结果
-                review_record = QualityReviewResult(
-                    result_id=result_id,
-                    confirmed=review_result.get("confirmed"),
-                    risk_type=review_result.get("risk_type"),
-                    priority=review_result.get("priority"),
-                    first_mention_time=review_result.get("first_mention_time"),
-                    secondary_risk_level=review_result.get("secondary_risk_level"),
-                    review_reason=review_result.get("review_reason"),
-                    suggested_action=review_result.get("suggested_action"),
-                    confidence=review_result.get("confidence"),
-                    review_status="completed" if ai_status == "success" else "failed",
-                    review_mode="batch",
-                    batch_id=batch_id,
-                    error_msg=review_result.get("error_msg"),
-                    created_at=to_naive_shanghai(now_shanghai()),
-                    completed_at=to_naive_shanghai(now_shanghai()) if ai_status == "success" else None,
-                )
-                session.add(review_record)
+                # 查找已有的失败记录（用于重试时更新而非重复创建）
+                existing_failed = session.execute(
+                    select(QualityReviewResult).where(
+                        QualityReviewResult.result_id == result_id,
+                        QualityReviewResult.review_status == "failed"
+                    )
+                ).scalar_one_or_none()
 
-                # 更新质检结果标记
-                quality_result.has_secondary_review = True
+                if ai_status == "success":
+                    # 成功：更新已有失败记录或创建新记录
+                    if existing_failed:
+                        existing_failed.confirmed = review_result.get("confirmed")
+                        existing_failed.risk_type = review_result.get("risk_type")
+                        existing_failed.priority = review_result.get("priority")
+                        existing_failed.first_mention_time = review_result.get("first_mention_time")
+                        existing_failed.secondary_risk_level = review_result.get("secondary_risk_level")
+                        existing_failed.review_reason = review_result.get("review_reason")
+                        existing_failed.suggested_action = review_result.get("suggested_action")
+                        existing_failed.confidence = review_result.get("confidence")
+                        existing_failed.review_status = "completed"
+                        existing_failed.error_msg = None
+                        existing_failed.completed_at = to_naive_shanghai(now_shanghai())
+                        existing_failed.batch_id = batch_id
+                    else:
+                        review_record = QualityReviewResult(
+                            result_id=result_id,
+                            confirmed=review_result.get("confirmed"),
+                            risk_type=review_result.get("risk_type"),
+                            priority=review_result.get("priority"),
+                            first_mention_time=review_result.get("first_mention_time"),
+                            secondary_risk_level=review_result.get("secondary_risk_level"),
+                            review_reason=review_result.get("review_reason"),
+                            suggested_action=review_result.get("suggested_action"),
+                            confidence=review_result.get("confidence"),
+                            review_status="completed",
+                            review_mode="batch",
+                            batch_id=batch_id,
+                            error_msg=None,
+                            retry_count=0,
+                            created_at=to_naive_shanghai(now_shanghai()),
+                            completed_at=to_naive_shanghai(now_shanghai()),
+                        )
+                        session.add(review_record)
 
-                session.commit()
-                success_count += 1
-                print(f"[batch_review] [{idx}/{total}] result_id={result_id} 审查完成并保存 ✓")
+                    quality_result.has_secondary_review = True
+                    session.commit()
+                    success_count += 1
+                    print(f"[batch_review] [{idx}/{total}] result_id={result_id} 审查完成并保存 ✓")
+
+                else:
+                    # 失败：更新已有记录或创建新记录
+                    if existing_failed:
+                        new_retry = (existing_failed.retry_count or 0) + 1
+                        existing_failed.retry_count = new_retry
+                        existing_failed.review_reason = review_result.get("review_reason")
+                        existing_failed.error_msg = review_result.get("error_msg")
+                        existing_failed.batch_id = batch_id
+                        retry_count = new_retry
+                    else:
+                        review_record = QualityReviewResult(
+                            result_id=result_id,
+                            confirmed=None,
+                            risk_type="其他",
+                            priority="P2",
+                            first_mention_time=None,
+                            secondary_risk_level="unknown",
+                            review_reason=review_result.get("review_reason", "AI审查失败"),
+                            suggested_action="主管复核",
+                            confidence=0.0,
+                            review_status="failed",
+                            review_mode="batch",
+                            batch_id=batch_id,
+                            error_msg=review_result.get("error_msg"),
+                            retry_count=1,
+                            created_at=to_naive_shanghai(now_shanghai()),
+                        )
+                        session.add(review_record)
+                        retry_count = 1
+
+                    if retry_count >= MAX_TASK_RETRIES:
+                        quality_result.has_secondary_review = True
+                        session.commit()
+                        fail_count += 1
+                        print(f"[batch_review] [{idx}/{total}] result_id={result_id} "
+                              f"已达最大重试({MAX_TASK_RETRIES}次)，标记为已审查")
+                    else:
+                        session.commit()
+                        fail_count += 1
+                        print(f"[batch_review] [{idx}/{total}] result_id={result_id} "
+                              f"审查失败(第{retry_count}/{MAX_TASK_RETRIES}次)，等待下次自动重试")
 
             except Exception as e:
+                # 意外异常（非AI调用失败，如数据库错误等）
                 fail_count += 1
-                print(f"[batch_review] [{idx}/{total}] result_id={result_id} 审查失败: {str(e)}")
-                # 记录失败状态
-                review_record = QualityReviewResult(
-                    result_id=result_id,
-                    confirmed=None,
-                    risk_type="其他",
-                    priority="P2",
-                    first_mention_time=None,
-                    secondary_risk_level="unknown",
-                    review_reason=f"审查失败: {str(e)}",
-                    suggested_action="主管复核",
-                    confidence=0.0,
-                    review_status="failed",
-                    review_mode="batch",
-                    batch_id=batch_id,
-                    error_msg=str(e),
-                    created_at=to_naive_shanghai(now_shanghai()),
-                )
-                session.add(review_record)
+                print(f"[batch_review] [{idx}/{total}] result_id={result_id} 意外异常: {str(e)}")
+
+                existing_failed = session.execute(
+                    select(QualityReviewResult).where(
+                        QualityReviewResult.result_id == result_id,
+                        QualityReviewResult.review_status == "failed"
+                    )
+                ).scalar_one_or_none()
+
+                if existing_failed:
+                    new_retry = (existing_failed.retry_count or 0) + 1
+                    existing_failed.retry_count = new_retry
+                    existing_failed.review_reason = f"审查异常: {str(e)}"
+                    existing_failed.error_msg = str(e)
+                    existing_failed.batch_id = batch_id
+                    retry_count = new_retry
+                else:
+                    review_record = QualityReviewResult(
+                        result_id=result_id,
+                        confirmed=None,
+                        risk_type="其他",
+                        priority="P2",
+                        first_mention_time=None,
+                        secondary_risk_level="unknown",
+                        review_reason=f"审查异常: {str(e)}",
+                        suggested_action="主管复核",
+                        confidence=0.0,
+                        review_status="failed",
+                        review_mode="batch",
+                        batch_id=batch_id,
+                        error_msg=str(e),
+                        retry_count=1,
+                        created_at=to_naive_shanghai(now_shanghai()),
+                    )
+                    session.add(review_record)
+                    retry_count = 1
+
+                if retry_count >= MAX_TASK_RETRIES:
+                    quality_result.has_secondary_review = True
                 session.commit()
 
     summary = (f"[batch_review] ========== 批量二次审查完成 batch_id={batch_id} "

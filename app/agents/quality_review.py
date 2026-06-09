@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """质检二次审查智能体 — 风险等级复核"""
 import json
+import time
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -130,6 +131,25 @@ def _format_key_evidence(key_evidence: list) -> str:
     return "\n".join(formatted)
 
 
+# 瞬时性错误关键词，命中则触发重试
+_TRANSIENT_KEYWORDS = [
+    "timeout", "timed out", "read timeout", "connect timeout",
+    "connection", "connectionerror", "connectionreset",
+    "remote end closed", "eof occurred",
+    "429", "rate limit", "too many requests",
+    "500", "502", "503", "504",
+    "server_error", "internal server error", "bad gateway",
+    "service unavailable", "gateway timeout",
+    "temporarily unavailable", "overloaded",
+]
+
+
+def _is_transient_error(error_msg: str) -> bool:
+    """判断是否为瞬时性错误（超时、连接、限流、服务端错误），可重试"""
+    lower = error_msg.lower()
+    return any(kw in lower for kw in _TRANSIENT_KEYWORDS)
+
+
 @AgentRegistry.register("质检二次审查")
 def quality_review_agent(
     result_id: int,
@@ -162,6 +182,7 @@ def quality_review_agent(
     # 带重试的AI调用
     semaphore = get_ai_semaphore()
     max_retries = 3
+    backoff_seconds = [2, 5, 15]  # 指数退避
     last_error = None
 
     for retry in range(max_retries):
@@ -181,11 +202,16 @@ def quality_review_agent(
 
         except Exception as e:
             last_error = str(e)
-            # 如果是429错误，继续重试
-            if "429" in last_error and retry < max_retries - 1:
-                print(f"AI call failed with 429, retrying ({retry + 1}/{max_retries})...")
+            is_transient = _is_transient_error(last_error)
+
+            if is_transient and retry < max_retries - 1:
+                wait = backoff_seconds[retry]
+                print(f"[quality_review_agent] result_id={result_id} 瞬时错误({last_error[:80]}), "
+                      f"{wait}s 后重试 ({retry + 1}/{max_retries})...")
+                time.sleep(wait)
                 continue
-            # 其他错误或最后一次重试失败，返回错误
+
+            # 非瞬时错误或最后一次重试失败，跳出
             break
 
     # 所有重试都失败
