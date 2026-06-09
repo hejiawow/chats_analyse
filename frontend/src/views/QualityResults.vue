@@ -191,16 +191,14 @@
 
     <!-- 列设置 -->
     <div class="qr-table-toolbar">
-      <!-- 批量操作 -->
-      <a-space v-if="selectedRowKeys.length > 0" style="margin-right: 16px">
-        <a-button
-          type="primary"
-          @click="handleBatchReview"
-          :loading="batchReviewing"
-        >
-          批量二次审查 ({{ selectedRowKeys.length }}条)
-        </a-button>
-      </a-space>
+      <a-button
+        type="primary"
+        @click="handleAutoBatchReview"
+        :loading="autoReviewing"
+        style="margin-right: 12px"
+      >
+        一键审查
+      </a-button>
       <a-popover
         v-model:open="columnSettingsOpen"
         title="列显示设置"
@@ -237,11 +235,6 @@
       size="small"
       @change="handleTableChange"
       :scroll="{ x: 'max-content' }"
-      :rowSelection="{
-        selectedRowKeys: selectedRowKeys,
-        onChange: onSelectChange,
-        getCheckboxProps: getCheckboxProps,
-      }"
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'created_at'">
@@ -315,15 +308,6 @@
         <template v-if="column.key === 'actions'">
           <a-button size="small" type="link" @click="showDetail(record)">详情</a-button>
           <a-button size="small" type="link" @click="showEdit(record)">编辑</a-button>
-          <a-button
-            v-if="canReview(record)"
-            size="small"
-            type="primary"
-            @click="handleInstantReview(record)"
-            :loading="record.reviewing"
-          >
-            申请二次审查
-          </a-button>
         </template>
       </template>
     </a-table>
@@ -578,7 +562,7 @@ import { message } from 'ant-design-vue'
 import { SettingOutlined } from '@ant-design/icons-vue'
 import * as echarts from 'echarts'
 import { getQualityCheckList, getQualityCheckStats, exportQualityCheckResults, getActiveKeywords, getQualityCheckChatRecords, updateQualityCheckResult, getQualityCheckModificationLogs, getQualityCheckDetail } from '@/api/qualitycheck'
-import { instantReview, batchReview } from '@/api/qualityreview'
+import { instantReview, autoBatchReview } from '@/api/qualityreview'
 
 // 关键词缓存配置
 const KEYWORDS_CACHE_KEY = 'qc_keywords_cache'
@@ -661,7 +645,7 @@ const allColumns = [
   { title: '风险类别', dataIndex: 'risk_category', key: 'risk_category', minWidth: 100 },
   { title: '二次审查', dataIndex: 'has_secondary_review', key: 'has_secondary_review', width: 100 },
   { title: '备注', dataIndex: 'remark', key: 'remark', width: 150, ellipsis: true },
-  { title: '操作', key: 'actions', width: 110, fixed: 'right' },
+  { title: '操作', key: 'actions', width: 90, fixed: 'right' },
 ]
 
 // 列显示配置
@@ -755,9 +739,8 @@ const modificationLogsVisible = ref(false)
 const modificationLogsLoading = ref(false)
 const modificationLogsData = ref([])
 
-// 批量审查
-const selectedRowKeys = ref([])
-const batchReviewing = ref(false)
+// 一键审查
+const autoReviewing = ref(false)
 
 // 风险等级映射
 function getRiskColor(level) {
@@ -887,55 +870,19 @@ const getProcessStatusText = (status) => {
   return textMap[status] || '未定'
 }
 
-// 二次审查相关函数
-function canReview(record) {
-  // 仅高中风险且未审查的结果可以审查
-  const effectiveRisk = record.display_risk_level || record.risk_level
-  return (effectiveRisk === 'high' || effectiveRisk === 'medium') && !record.has_secondary_review
-}
-
-async function handleInstantReview(record) {
-  record.reviewing = true
+// 一键审查所有未审查的高中风险结果
+async function handleAutoBatchReview() {
+  autoReviewing.value = true
   try {
-    const res = await instantReview(record.id)
-    message.success('二次审查完成')
-    // 刷新数据
-    loadData()
-    // 可选：直接显示审查结果
-    console.log('审查结果:', res)
-  } catch (error) {
-    message.error(error.response?.data?.detail || '二次审查失败')
-  } finally {
-    record.reviewing = false
-  }
-}
-
-function onSelectChange(keys) {
-  selectedRowKeys.value = keys
-}
-
-function getCheckboxProps(record) {
-  return {
-    disabled: !canReview(record),
-  }
-}
-
-async function handleBatchReview() {
-  if (selectedRowKeys.value.length === 0) {
-    message.warning('请选择要审查的结果')
-    return
-  }
-
-  batchReviewing.value = true
-  try {
-    const res = await batchReview(selectedRowKeys.value)
+    const res = await autoBatchReview()
     message.success(res.message)
-    selectedRowKeys.value = []
     loadData()
+    loadStats()
   } catch (error) {
-    message.error(error.response?.data?.detail || '批量审查失败')
+    const detail = error?.response?.data?.detail || error?.message || '一键审查失败'
+    message.error(detail)
   } finally {
-    batchReviewing.value = false
+    autoReviewing.value = false
   }
 }
 

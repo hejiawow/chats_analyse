@@ -4,9 +4,13 @@ import request from './request'
 export const instantReview = (resultId) =>
   request.post(`/api/quality-review/instant/${resultId}`)
 
-// 批量异步审查
+// 批量异步审查（手动选择）
 export const batchReview = (resultIds) =>
   request.post('/api/quality-review/batch', { result_ids: resultIds })
+
+// 一键审查所有未审查的高中风险结果
+export const autoBatchReview = () =>
+  request.post('/api/quality-review/auto-batch')
 
 // 查询审查结果列表
 export const getReviewList = (params) =>

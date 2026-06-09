@@ -5,7 +5,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_, and_
 
 from app.models.database import async_session
 from app.models.result import QualityCheckResult, QualityReviewResult, QualityCheckDetail, QualityCheckTask
@@ -88,6 +88,47 @@ async def batch_quality_review(
         "batch_id": batch_id,
         "total_count": len(request.result_ids),
         "message": f"已提交 {len(request.result_ids)} 条二次审查任务"
+    }
+
+
+@router.post("/quality-review/auto-batch")
+async def auto_batch_quality_review(
+    current_user: dict = Depends(require_permission("write:quality_review")),
+):
+    """一键审查所有未审查的高中风险结果
+
+    流程：
+    1. 查询所有 has_secondary_review=False 且有效风险等级为 high/medium 的结果
+    2. 生成批次号（UUID）
+    3. 提交Celery异步任务
+    4. 返回批次号和总数
+    """
+    async with async_session() as session:
+        # 查询所有符合条件的未审查结果ID
+        # 有效风险等级：modified_risk_level 优先，无修正时用 risk_level
+        stmt = select(QualityCheckResult.id).where(
+            QualityCheckResult.has_secondary_review == False,
+            or_(
+                QualityCheckResult.modified_risk_level.in_(["high", "medium"]),
+                and_(
+                    QualityCheckResult.modified_risk_level == None,
+                    QualityCheckResult.risk_level.in_(["high", "medium"])
+                )
+            )
+        )
+        result = await session.execute(stmt)
+        result_ids = [row[0] for row in result.all()]
+
+    if not result_ids:
+        raise HTTPException(status_code=404, detail="暂无未审查的高中风险结果")
+
+    batch_id = str(uuid.uuid4())
+    batch_quality_review_task.delay(result_ids, batch_id)
+
+    return {
+        "batch_id": batch_id,
+        "total_count": len(result_ids),
+        "message": f"已提交 {len(result_ids)} 条未审查高中风险结果进行二次审查"
     }
 
 
