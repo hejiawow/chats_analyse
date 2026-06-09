@@ -251,6 +251,7 @@ async def query_quality_review_results(
                 QualityCheckResult.friend_name,
                 QualityCheckResult.risk_level.label("original_risk_level"),
                 QualityCheckResult.modified_risk_level,
+                QualityCheckResult.risk_category,
             )
             .outerjoin(QualityCheckResult, QualityReviewResult.result_id == QualityCheckResult.id)
         )
@@ -304,6 +305,7 @@ async def query_quality_review_results(
             item["friend_name"] = row[2]
             item["original_risk_level"] = row[3]
             item["modified_risk_level"] = row[4]
+            item["risk_category"] = row[5]
             data.append(item)
 
         return {
@@ -344,13 +346,78 @@ async def get_quality_review_detail(
                 "risk_level": quality_record.risk_level,
                 "modified_risk_level": quality_record.modified_risk_level,
                 "issue_summary": quality_record.issue_summary,
+                "user_id": quality_record.user_id,
                 "user_name": quality_record.user_name,
+                "friend_id": quality_record.friend_id,
                 "friend_name": quality_record.friend_name,
+                "chat_title": quality_record.chat_title,
+                "phone": quality_record.phone,
                 "detected_keywords": quality_record.detected_keywords,
                 "risk_category": quality_record.risk_category,
                 "trigger_party": quality_record.trigger_party,
+                "action_priority": quality_record.action_priority,
+                "recommended_owner": quality_record.recommended_owner,
+                "action_type": quality_record.action_type,
+                "follow_up_deadline": quality_record.follow_up_deadline,
+                "needs_manual_review": quality_record.needs_manual_review,
                 "process_status": quality_record.process_status,
                 "created_at": quality_record.created_at.isoformat() if quality_record.created_at else None,
             }
 
+            # 查询 detail 表获取 key_evidence
+            detail_stmt = select(QualityCheckDetail).where(
+                QualityCheckDetail.result_id == quality_record.id
+            )
+            detail_result = await session.execute(detail_stmt)
+            detail = detail_result.scalar_one_or_none()
+            if detail:
+                data["quality_check_result"]["key_evidence"] = detail.key_evidence or []
+
         return data
+
+
+class ReviewUpdateRequest(BaseModel):
+    confirmed: bool | None = None
+    risk_type: str | None = None
+    priority: str | None = None
+    first_mention_time: str | None = None
+    secondary_risk_level: str | None = None
+    review_reason: str | None = None
+    suggested_action: str | None = None
+
+
+@router.put("/quality-review/{review_id}")
+async def update_quality_review(
+    review_id: int,
+    request: ReviewUpdateRequest,
+    current_user: dict = Depends(require_permission("write:quality_review")),
+):
+    """编辑二次审查结果"""
+    async with async_session() as session:
+        stmt = select(QualityReviewResult).where(QualityReviewResult.id == review_id)
+        result = await session.execute(stmt)
+        review_record = result.scalar_one_or_none()
+
+        if not review_record:
+            raise HTTPException(status_code=404, detail="审查记录不存在")
+
+        # 更新传入的字段
+        if request.confirmed is not None:
+            review_record.confirmed = request.confirmed
+        if request.risk_type is not None:
+            review_record.risk_type = request.risk_type
+        if request.priority is not None:
+            review_record.priority = request.priority
+        if request.first_mention_time is not None:
+            review_record.first_mention_time = request.first_mention_time
+        if request.secondary_risk_level is not None:
+            review_record.secondary_risk_level = request.secondary_risk_level
+        if request.review_reason is not None:
+            review_record.review_reason = request.review_reason
+        if request.suggested_action is not None:
+            review_record.suggested_action = request.suggested_action
+
+        await session.commit()
+        await session.refresh(review_record)
+
+        return review_record.to_dict()

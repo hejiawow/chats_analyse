@@ -13,7 +13,7 @@ from app.services.hujing_api import get_chat_records_for_quality_check
 from config import now_shanghai, to_naive_shanghai
 
 # Task层最大重试次数，超过后标记为已审查不再重试
-MAX_TASK_RETRIES = 5
+MAX_TASK_RETRIES = 10
 
 
 @shared_task(bind=True, name="batch_quality_review")

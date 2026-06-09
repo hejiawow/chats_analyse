@@ -31,7 +31,8 @@ celery_app.conf.update(
         },
         "auto-quality-review-every-2-hours": {
             "task": "app.tasks.quality_review.auto_quality_review_task",
-            "schedule": crontab(minute=0, hour="*/2"),  # 每2小时执行一次
+            # "schedule": crontab(minute=0, hour="*/2"),  # 每2小时执行一次
+            "schedule": crontab(minute="*/1", hour=0),  # 每2小时执行一次
         },
     },
 )
