@@ -93,7 +93,7 @@ const allMenuItems = [
     children: [
       { key: 'QualityCheck', label: '质检分析', icon: SafetyOutlined, permission: 'write:quality_check' },
       { key: 'QualityResults', label: '质检结果', icon: FileSearchOutlined, permission: 'read:quality_check' },
-      { key: 'QualityReview', label: '二次审查', icon: AuditOutlined, permission: 'read:quality_review' },
+      { key: 'QualityReview', label: '退款投诉审查', icon: AuditOutlined, permission: 'read:quality_review' },
       { key: 'Keywords', label: '关键词管理', icon: KeyOutlined, permission: 'admin:keywords' },
       { key: 'Whitelist', label: '话术白名单', icon: SafetyOutlined, permission: 'admin:whitelist' },
     ]

@@ -29,10 +29,9 @@ celery_app.conf.update(
             "task": "app.tasks.log_flush.flush_logs",
             "schedule": 30.0,  # 每30秒刷新日志缓冲队列
         },
-        "auto-quality-review-every-2-hours": {
-            "task": "app.tasks.quality_review.auto_quality_review_task",
-            # "schedule": crontab(minute=0, hour="*/2"),  # 每2小时执行一次
-            "schedule": crontab(minute="*/1", hour=0),  # 每2小时执行一次
+        "auto-quality-review": {
+            "task": "auto_quality_review_consumer",
+            "schedule": crontab(minute="*/5"),  # 每5分钟触发一次，单次执行（查→处理→退出）
         },
     },
 )

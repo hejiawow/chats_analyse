@@ -11,14 +11,14 @@
           </a-select>
         </a-form-item>
         <a-form-item label="风险类型">
-          <a-select v-model:value="filters.risk_type" placeholder="全部" style="width: 100px" allowClear>
+          <a-select v-model:value="filters.risk_types" mode="multiple" placeholder="全部" style="width: 200px" allowClear :maxTagCount="2">
             <a-select-option value="退费">退费</a-select-option>
             <a-select-option value="投诉">投诉</a-select-option>
             <a-select-option value="其他">其他</a-select-option>
           </a-select>
         </a-form-item>
         <a-form-item label="优先级">
-          <a-select v-model:value="filters.priority" placeholder="全部" style="width: 90px" allowClear>
+          <a-select v-model:value="filters.priorities" mode="multiple" placeholder="全部" style="width: 200px" allowClear :maxTagCount="2">
             <a-select-option value="P0">P0</a-select-option>
             <a-select-option value="P1">P1</a-select-option>
             <a-select-option value="P2">P2</a-select-option>
@@ -26,14 +26,14 @@
           </a-select>
         </a-form-item>
         <a-form-item label="二次风险等级">
-          <a-select v-model:value="filters.secondary_risk_level" placeholder="全部" style="width: 120px" allowClear>
+          <a-select v-model:value="filters.secondary_risk_levels" mode="multiple" placeholder="全部" style="width: 260px" allowClear :maxTagCount="2">
             <a-select-option value="high">高风险</a-select-option>
             <a-select-option value="medium">中风险</a-select-option>
             <a-select-option value="low">低风险</a-select-option>
             <a-select-option value="none">无风险</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="是否确认">
+        <a-form-item label="是否属退费投诉">
           <a-select v-model:value="filters.confirmed" placeholder="全部" style="width: 90px" allowClear>
             <a-select-option :value="true">是</a-select-option>
             <a-select-option :value="false">否</a-select-option>
@@ -295,9 +295,9 @@ const chatTimeRange = ref(null)
 
 const filters = reactive({
   review_status: undefined,
-  risk_type: undefined,
-  priority: undefined,
-  secondary_risk_level: undefined,
+  risk_types: [],
+  priorities: [],
+  secondary_risk_levels: [],
   confirmed: undefined,
 })
 
@@ -313,9 +313,9 @@ const columns = [
   { title: '质检ID', key: 'result_id', dataIndex: 'result_id', width: 80 },
   { title: '销售姓名', dataIndex: 'user_name', key: 'user_name', width: 90 },
   { title: '好友姓名', dataIndex: 'friend_name', key: 'friend_name', width: 100 },
-  { title: '是否确认', key: 'confirmed', width: 85 },
-  { title: '第一次风险类别', key: 'risk_category', width: 110 },
-  { title: '二次风险类型', key: 'risk_type', width: 100 },
+  { title: '是否属退费投诉', key: 'confirmed', width: 110 },
+  { title: '初次质检风险', key: 'risk_category', width: 110 },
+  { title: '二次判定风险', key: 'risk_type', width: 100 },
   { title: '优先级', key: 'priority', width: 70 },
   { title: '风险等级对比', key: 'risk_level_comparison', width: 170 },
   { title: '审查状态', key: 'review_status', width: 90 },
@@ -358,9 +358,9 @@ async function fetchData() {
   try {
     const params = { page: pagination.current, page_size: pagination.pageSize }
     if (filters.review_status) params.review_status = filters.review_status
-    if (filters.risk_type) params.risk_type = filters.risk_type
-    if (filters.priority) params.priority = filters.priority
-    if (filters.secondary_risk_level) params.secondary_risk_level = filters.secondary_risk_level
+    if (filters.risk_types && filters.risk_types.length) params.risk_type = filters.risk_types.join(',')
+    if (filters.priorities && filters.priorities.length) params.priority = filters.priorities.join(',')
+    if (filters.secondary_risk_levels && filters.secondary_risk_levels.length) params.secondary_risk_level = filters.secondary_risk_levels.join(',')
     if (filters.confirmed !== undefined && filters.confirmed !== null) params.confirmed = filters.confirmed
     const res = await getReviewList(params)
     data.value = res.data || []
