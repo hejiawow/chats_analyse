@@ -298,7 +298,7 @@ const filters = reactive({
   risk_types: [],
   priorities: [],
   secondary_risk_levels: [],
-  confirmed: undefined,
+  confirmed: true,
 })
 
 const pagination = reactive({
