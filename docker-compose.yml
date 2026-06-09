@@ -38,7 +38,7 @@ services:
 
   worker:
     build: .
-    command: celery -A app.celery_app worker --loglevel=info --concurrency=10
+    command: sh -c "celery -A app.celery_app worker --loglevel=info --concurrency=10 & celery -A app.celery_app beat --loglevel=info"
     env_file: .env
     environment:
       - TZ=Asia/Shanghai

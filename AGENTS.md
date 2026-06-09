@@ -136,6 +136,12 @@ alembic/                 # 数据库迁移脚本
 - **数据库**: PostgreSQL，异步操作使用 asyncpg，同步操作使用 psycopg2
 - **时区**: 统一使用东八区 (Asia/Shanghai)，通过 `config.now_shanghai()` 获取当前时间
 - **Alembic**: 迁移脚本位于 `alembic/versions/`，注意维护 `down_revision` 链的正确性
+  - **命名规范**: `{YYYYMMDD}_{序号}_{描述}.py`，例如 `20260609_01_add_retry_count.py`
+    - `YYYYMMDD`: 日期前缀，确保时间顺序
+    - `序号`: 同一天的迁移用两位数字递增（01, 02, 03...）
+    - `描述`: 小写下划线分隔，简洁描述变更内容
+  - **revision ID**: 使用 `{YYYYMMDD}_{序号}` 格式，例如 `20260609_01`
+  - **分支管理**: 新功能分支应基于主分支最新版本设置 `down_revision`，避免分支交叉
 - **前端**: Vue 3 Composition API + Pinia + Vue Router
 
 

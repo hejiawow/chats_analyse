@@ -191,6 +191,14 @@
 
     <!-- 列设置 -->
     <div class="qr-table-toolbar">
+      <a-button
+        type="primary"
+        @click="handleAutoBatchReview"
+        :loading="autoReviewing"
+        style="margin-right: 12px"
+      >
+        一键审查
+      </a-button>
       <a-popover
         v-model:open="columnSettingsOpen"
         title="列显示设置"
@@ -226,7 +234,7 @@
       row-key="id"
       size="small"
       @change="handleTableChange"
-      :scroll="{ x: 'max-content' }" 
+      :scroll="{ x: 'max-content' }"
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'created_at'">
@@ -289,6 +297,10 @@
           <a-tag :color="getProcessStatusColor(record.process_status)">
             {{ getProcessStatusText(record.process_status) }}
           </a-tag>
+        </template>
+        <template v-if="column.key === 'has_secondary_review'">
+          <a-tag v-if="record.has_secondary_review" color="green">已审查</a-tag>
+          <a-tag v-else color="default">未审查</a-tag>
         </template>
         <template v-if="column.key === 'remark'">
           <span :title="record.remark">{{ record.remark || '-' }}</span>
@@ -550,6 +562,7 @@ import { message } from 'ant-design-vue'
 import { SettingOutlined } from '@ant-design/icons-vue'
 import * as echarts from 'echarts'
 import { getQualityCheckList, getQualityCheckStats, exportQualityCheckResults, getActiveKeywords, getQualityCheckChatRecords, updateQualityCheckResult, getQualityCheckModificationLogs, getQualityCheckDetail } from '@/api/qualitycheck'
+import { autoBatchReview } from '@/api/qualityreview'
 
 // 关键词缓存配置
 const KEYWORDS_CACHE_KEY = 'qc_keywords_cache'
@@ -630,8 +643,9 @@ const allColumns = [
   { title: '处理状态', key: 'process_status', minWidth: 100 },
   { title: '检测关键词', key: 'detected_keywords', minWidth: 150, ellipsis: true },
   { title: '风险类别', dataIndex: 'risk_category', key: 'risk_category', minWidth: 100 },
+  { title: '二次审查', dataIndex: 'has_secondary_review', key: 'has_secondary_review', width: 100 },
   { title: '备注', dataIndex: 'remark', key: 'remark', width: 150, ellipsis: true },
-  { title: '操作', key: 'actions', width: 110, fixed: 'right' },
+  { title: '操作', key: 'actions', width: 90, fixed: 'right' },
 ]
 
 // 列显示配置
@@ -724,6 +738,9 @@ const chatRecordsTimeRange = ref(null)
 const modificationLogsVisible = ref(false)
 const modificationLogsLoading = ref(false)
 const modificationLogsData = ref([])
+
+// 一键审查
+const autoReviewing = ref(false)
 
 // 风险等级映射
 function getRiskColor(level) {
@@ -851,6 +868,22 @@ const getProcessStatusText = (status) => {
     escalated: '已升级'
   }
   return textMap[status] || '未定'
+}
+
+// 一键审查所有未审查的高中风险结果
+async function handleAutoBatchReview() {
+  autoReviewing.value = true
+  try {
+    const res = await autoBatchReview()
+    message.success(res.message)
+    loadData()
+    loadStats()
+  } catch (error) {
+    const detail = error?.response?.data?.detail || error?.message || '一键审查失败'
+    message.error(detail)
+  } finally {
+    autoReviewing.value = false
+  }
 }
 
 // 加载统计（响应筛选条件，但不包括风险等级）

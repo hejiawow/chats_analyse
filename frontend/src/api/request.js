@@ -3,7 +3,7 @@ import { message } from 'ant-design-vue'
 
 const request = axios.create({
   baseURL: '',
-  timeout: 30000,
+  timeout: 120000,  // 2 minutes - AI calls can take long time
 })
 
 // Request interceptor: attach JWT token
