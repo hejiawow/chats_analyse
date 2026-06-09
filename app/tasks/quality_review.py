@@ -50,9 +50,23 @@ def batch_quality_review_task(self, result_ids: list, batch_id: str):
                     skip_count += 1
                     continue
 
-                # 检查是否已审查
+                # 检查是否已审查（双重保障：标记 + 实际记录）
                 if quality_result.has_secondary_review:
-                    print(f"[batch_review] [{idx}/{total}] result_id={result_id} 已审查，跳过")
+                    print(f"[batch_review] [{idx}/{total}] result_id={result_id} 已审查（标记），跳过")
+                    skip_count += 1
+                    continue
+
+                # 额外检查：是否已存在 completed 的审查记录（防止竞态）
+                existing_completed = session.execute(
+                    select(QualityReviewResult).where(
+                        QualityReviewResult.result_id == result_id,
+                        QualityReviewResult.review_status == "completed"
+                    )
+                ).scalar_one_or_none()
+                if existing_completed:
+                    print(f"[batch_review] [{idx}/{total}] result_id={result_id} 已有completed审查记录，跳过并修正标记")
+                    quality_result.has_secondary_review = True
+                    session.commit()
                     skip_count += 1
                     continue
 
@@ -250,8 +264,18 @@ def auto_quality_review_task(self):
     print("[auto_quality_review] 定时任务触发，查询未审查的高中风险结果...")
 
     with Session(sync_engine) as session:
+        # 子查询排除已存在 completed 审查记录的 result_id
+        completed_subq = (
+            select(QualityReviewResult.result_id)
+            .where(QualityReviewResult.review_status == "completed")
+            .scalar_subquery()
+        )
         stmt = select(QualityCheckResult.id).where(
-            QualityCheckResult.has_secondary_review == False,
+            or_(
+                QualityCheckResult.has_secondary_review == False,
+                QualityCheckResult.has_secondary_review == None,
+            ),
+            QualityCheckResult.id.not_in(completed_subq),
             or_(
                 QualityCheckResult.modified_risk_level.in_(["high", "medium"]),
                 and_(

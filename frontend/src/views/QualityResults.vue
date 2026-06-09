@@ -562,7 +562,7 @@ import { message } from 'ant-design-vue'
 import { SettingOutlined } from '@ant-design/icons-vue'
 import * as echarts from 'echarts'
 import { getQualityCheckList, getQualityCheckStats, exportQualityCheckResults, getActiveKeywords, getQualityCheckChatRecords, updateQualityCheckResult, getQualityCheckModificationLogs, getQualityCheckDetail } from '@/api/qualitycheck'
-import { instantReview, autoBatchReview } from '@/api/qualityreview'
+import { autoBatchReview } from '@/api/qualityreview'
 
 // 关键词缓存配置
 const KEYWORDS_CACHE_KEY = 'qc_keywords_cache'
