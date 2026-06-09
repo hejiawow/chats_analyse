@@ -31,7 +31,11 @@ def pending_review_conditions():
                 QualityCheckResult.modified_risk_level == None,
                 QualityCheckResult.risk_level.in_(["high", "medium"])
             )
-        )
+        ),
+        # 风险类别：投诉、退款、监管介入、取消订单
+        QualityCheckResult.risk_category.in_(["投诉", "退款", "监管介入", "取消订单"]),
+        # 处理状态：未处理
+        QualityCheckResult.process_status == "pending",
     ]
 
 
