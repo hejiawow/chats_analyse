@@ -54,24 +54,35 @@ def show_stats(session: Session):
     for mode, count in rows:
         print(f"  {mode}: {count} 条")
 
-    # 4. 可被重新审查的高中风险记录数（重置后会被选中的）
-    print("\n=== 4. 高中风险质检结果统计 ===")
-    high_medium_count = session.execute(
+    # 4. 孤儿记录检测（has_secondary_review=True 但没有 completed 记录）
+    print("\n=== 4. 孤儿记录检测（卡死数据） ===")
+    completed_subq = (
+        select(QualityReviewResult.result_id)
+        .where(QualityReviewResult.review_status == "completed")
+        .scalar_subquery()
+    )
+    orphan_count = session.execute(
         select(func.count()).select_from(QualityCheckResult).where(
-            or_(
-                QualityCheckResult.modified_risk_level.in_(["high", "medium"]),
-                and_(
-                    QualityCheckResult.modified_risk_level == None,
-                    QualityCheckResult.risk_level.in_(["high", "medium"])
-                )
-            )
+            QualityCheckResult.has_secondary_review == True,
+            QualityCheckResult.id.not_in(completed_subq),
         )
     ).scalar()
-    print(f"  高中风险总数: {high_medium_count} 条")
-    print(f"  (重置后这些都会被纳入待审查)")
+    print(f"  孤儿记录数: {orphan_count} 条")
+    if orphan_count > 0:
+        print("  ⚠️  这些数据需要重置 has_secondary_review 才能重新审查")
 
-    # 5. Redis 锁状态
-    print("\n=== 5. Redis 锁状态 ===")
+    # 5. 符合新条件的待审查数量
+    print("\n=== 5. 符合新筛选条件的待审查数据 ===")
+    from app.services.quality_review_query import pending_review_conditions
+    conditions = pending_review_conditions()
+    pending_count = session.execute(
+        select(func.count()).select_from(QualityCheckResult).where(*conditions)
+    ).scalar()
+    print(f"  待审查: {pending_count} 条")
+    print("  (风险类别: 投诉/退款/监管介入/取消订单, 等级: high/medium, 状态: pending)")
+
+    # 6. Redis 锁状态
+    print("\n=== 6. Redis 锁状态 ===")
     try:
         from app.services.cache import get_redis
         redis_client = get_redis()
@@ -95,7 +106,24 @@ def reset_data(session: Session, keep_records: bool = False):
         session: 数据库 Session
         keep_records: True=仅重置标记（保留审查记录）; False=删除审查记录+重置标记
     """
-    # Step 1: 重置 has_secondary_review 标记
+    # Step 1: 修复孤儿记录（has_secondary_review=True 但没有 completed 记录）
+    completed_subq = (
+        select(QualityReviewResult.result_id)
+        .where(QualityReviewResult.review_status == "completed")
+        .scalar_subquery()
+    )
+    orphan_updated = session.execute(
+        QualityCheckResult.__table__.update()
+        .where(
+            QualityCheckResult.has_secondary_review == True,
+            QualityCheckResult.id.not_in(completed_subq),
+        )
+        .values(has_secondary_review=False)
+    )
+    if orphan_updated.rowcount > 0:
+        print(f"\n✓ 修复 {orphan_updated.rowcount} 条孤儿记录（Worker中断导致）")
+
+    # Step 2: 重置 has_secondary_review 标记
     updated = session.execute(
         QualityCheckResult.__table__.update()
         .where(
@@ -105,9 +133,9 @@ def reset_data(session: Session, keep_records: bool = False):
         )
         .values(has_secondary_review=False)
     )
-    print(f"\n✓ 已重置 {updated.rowcount} 条质检结果的 has_secondary_review → False")
+    print(f"✓ 已重置 {updated.rowcount} 条质检结果的 has_secondary_review → False")
 
-    # Step 2: 处理审查记录
+    # Step 3: 处理审查记录
     if keep_records:
         # 保留记录但标记为 archived（不影响查询逻辑）
         updated = session.execute(
@@ -123,7 +151,7 @@ def reset_data(session: Session, keep_records: bool = False):
         )
         print(f"✓ 已删除 {deleted.rowcount} 条审查记录")
 
-    # Step 3: 清除 Redis 锁
+    # Step 4: 清除 Redis 锁
     try:
         from app.services.cache import get_redis
         redis_client = get_redis()
