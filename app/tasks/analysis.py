@@ -6,7 +6,7 @@ import traceback
 import time
 from datetime import datetime
 from app.celery_app import celery_app
-from app.services.hujing_api import get_chat_records
+from app.services.hujing_api import get_chat_records, get_friends_by_ids, get_all_sales
 from app.services.datasource.manager import DataSourceManager
 from app.agents.registry import AgentRegistry
 import app.agents  # noqa: F401 - 触发所有 Agent 的注册
@@ -338,13 +338,31 @@ def run_analysis(self, task_id: str, user_id: str, friend_id: int,
                     _log(task_id, f"  [{agent_name}] 检测结果: {compliance_status}", "success")
 
                 elif agent_name == "质检检测":
+                    # 获取好友信息（chat_title、friend_name、alias 等）
+                    _friend_info_map = get_friends_by_ids([friend_id])
+                    _fi = _friend_info_map.get(friend_id, {})
+                    _friend_name = _fi.get("friend_name")
+                    _chat_title = _fi.get("chat_title")
+                    _alias = _fi.get("alias")
+                    _phone = _fi.get("phone")
+                    _remark_phone = _fi.get("remark_phone")
+                    # 获取销售姓名
+                    _sales_list = get_all_sales()
+                    _user_name = next((s.get("username") for s in _sales_list if s.get("user_id") == user_id), None)
+
                     # 保存主表记录（不含大字段）
                     record = QualityCheckResult(
                         user_id=user_id,
+                        user_name=_user_name,
                         user_wx_id=user_wx_id,
                         friend_id=friend_id,
+                        friend_name=_friend_name,
                         friend_wx_id=friend_wx_id,
                         friend_nick=friend_nick,
+                        chat_title=_chat_title,
+                        alias=_alias,
+                        phone=_phone,
+                        remark_phone=_remark_phone,
                         chat_record_count=result.get("chat_record_count"),
                         keyword_detected=result.get("keyword_detected", "no"),
                         detected_keywords=result.get("detected_keywords"),
