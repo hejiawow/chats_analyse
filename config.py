@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET_KEY: str = ""
 
+    # Open API
+    OPEN_API_KEY: str = ""
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
