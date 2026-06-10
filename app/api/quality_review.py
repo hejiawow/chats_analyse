@@ -297,6 +297,8 @@ async def query_quality_review_results(
     risk_type: str | None = Query(None, description="风险类型：退费/投诉/其他"),
     priority: str | None = Query(None, description="优先级：P0/P1/P2/P3"),
     confirmed: bool | None = Query(None, description="是否确认涉及退费或投诉"),
+    sort_field: str | None = Query(None, description="排序字段：completed_at, priority"),
+    sort_order: str | None = Query("desc", description="排序方向：asc/desc"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: dict = Depends(require_permission("read:quality_review")),
@@ -312,6 +314,9 @@ async def query_quality_review_results(
                 QualityCheckResult.risk_level.label("original_risk_level"),
                 QualityCheckResult.modified_risk_level,
                 QualityCheckResult.risk_category,
+                QualityCheckResult.issue_summary,
+                QualityCheckResult.process_status,
+                QualityCheckResult.remark,
             )
             .outerjoin(QualityCheckResult, QualityReviewResult.result_id == QualityCheckResult.id)
         )
@@ -327,8 +332,19 @@ async def query_quality_review_results(
 
         total = await session.scalar(count_stmt)
 
+        # 排序
+        sort_column_map = {
+            "completed_at": QualityReviewResult.completed_at,
+            "priority": QualityReviewResult.priority,
+            "created_at": QualityReviewResult.created_at,
+        }
+        order_by_clause = QualityReviewResult.created_at.desc()
+        if sort_field and sort_field in sort_column_map:
+            col = sort_column_map[sort_field]
+            order_by_clause = col.asc() if sort_order == "asc" else col.desc()
+        stmt = stmt.order_by(order_by_clause)
+
         # 分页查询
-        stmt = stmt.order_by(QualityReviewResult.created_at.desc())
         stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         result = await session.execute(stmt)
         rows = result.all()
@@ -343,6 +359,9 @@ async def query_quality_review_results(
             item["original_risk_level"] = row[3]
             item["modified_risk_level"] = row[4]
             item["risk_category"] = row[5]
+            item["issue_summary"] = row[6]
+            item["process_status"] = row[7]
+            item["remark"] = row[8]
             data.append(item)
 
         return {

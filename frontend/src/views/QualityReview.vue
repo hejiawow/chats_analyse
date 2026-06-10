@@ -81,16 +81,22 @@
             <a-tag :color="getRiskColor(record.secondary_risk_level)">{{ getRiskText(record.secondary_risk_level) }}</a-tag>
           </div>
         </template>
-        <template v-if="column.key === 'review_status'">
-          <a-tag :color="getStatusColor(record.review_status)">{{ getStatusText(record.review_status) }}</a-tag>
-        </template>
-        <template v-if="column.key === 'completed_at'">{{ formatDateTime(record.completed_at) }}</template>
-        <template v-if="column.key === 'retry_count'">
-          <span v-if="record.retry_count">{{ record.retry_count }}</span>
+        <template v-if="column.key === 'issue_summary'">
+          <a-tooltip v-if="record.issue_summary" placement="topLeft" :overlayStyle="{ maxWidth: '520px' }">
+            <template #title>
+              <span class="summary-tooltip-text">{{ record.issue_summary }}</span>
+            </template>
+            <span class="table-risk-desc clickable-summary">{{ record.issue_summary }}</span>
+          </a-tooltip>
           <span v-else>-</span>
         </template>
+        <template v-if="column.key === 'process_status'">
+          <a-tag :color="getProcessStatusColor(record.process_status)">{{ getProcessStatusText(record.process_status) }}</a-tag>
+        </template>
+        <template v-if="column.key === 'completed_at'">{{ formatDateTime(record.completed_at) }}</template>
         <template v-if="column.key === 'actions'">
           <a-button type="link" size="small" @click="showDetail(record)">详情</a-button>
+          <a-button type="link" size="small" @click="showProcessEdit(record)">人工处理</a-button>
         </template>
       </template>
     </a-table>
@@ -260,6 +266,38 @@
       </div>
       <template #footer><a-button @click="chatVisible = false">关闭</a-button></template>
     </a-modal>
+
+    <!-- 人工处理弹窗 -->
+    <a-modal v-model:open="processEditVisible" title="人工处理" width="600px" :footer="null" style="top: 20px">
+      <div v-if="processEditRecord" style="padding: 16px 0">
+        <a-descriptions :column="1" size="small" bordered :label-style="{ width: '100px', minWidth: '100px' }" style="margin-bottom: 16px">
+          <a-descriptions-item label="质检ID">{{ processEditRecord.result_id }}</a-descriptions-item>
+          <a-descriptions-item label="销售姓名">{{ processEditRecord.user_name || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="好友姓名">{{ processEditRecord.friend_name || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="问题摘要">
+            <pre class="pre-wrap">{{ processEditRecord.issue_summary || '-' }}</pre>
+          </a-descriptions-item>
+        </a-descriptions>
+        <a-form :label-col="{ style: { width: '100px' } }" size="small">
+          <a-form-item label="处理状态">
+            <a-select v-model:value="processEditForm.process_status">
+              <a-select-option value="pending">待处理</a-select-option>
+              <a-select-option value="processing">处理中</a-select-option>
+              <a-select-option value="resolved">已处理</a-select-option>
+              <a-select-option value="false_positive">误报</a-select-option>
+              <a-select-option value="escalated">已升级</a-select-option>
+            </a-select>
+          </a-form-item>
+          <a-form-item label="备注">
+            <a-textarea v-model:value="processEditForm.remark" :rows="4" placeholder="请输入处理备注" />
+          </a-form-item>
+        </a-form>
+        <div style="text-align: right">
+          <a-button @click="processEditVisible = false" style="margin-right: 8px">取消</a-button>
+          <a-button type="primary" :loading="processEditLoading" @click="saveProcessEdit">保存</a-button>
+        </div>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -268,6 +306,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { getReviewList, getReviewDetail, updateReviewDetail, getReviewChatRecords } from '@/api/qualityreview'
+import { updateQualityCheckResult } from '@/api/qualitycheck'
 
 const router = useRouter()
 
@@ -309,19 +348,33 @@ const pagination = reactive({
   total: 0
 })
 
+const sorter = reactive({
+  field: null,
+  order: null
+})
+
+// 人工处理弹窗状态
+const processEditVisible = ref(false)
+const processEditLoading = ref(false)
+const processEditRecord = ref(null)
+const processEditForm = reactive({
+  process_status: 'pending',
+  remark: ''
+})
+
 const columns = [
   { title: '质检ID', key: 'result_id', dataIndex: 'result_id', width: 80 },
   { title: '销售姓名', dataIndex: 'user_name', key: 'user_name', width: 90 },
   { title: '好友姓名', dataIndex: 'friend_name', key: 'friend_name', width: 100 },
   { title: '是否属退费投诉', key: 'confirmed', width: 110 },
   { title: '初次质检风险', key: 'risk_category', width: 110 },
+  { title: '问题摘要', key: 'issue_summary', width: 200, ellipsis: true },
   { title: '二次判定风险', key: 'risk_type', width: 100 },
-  { title: '优先级', key: 'priority', width: 70 },
+  { title: '优先级', key: 'priority', width: 70, sorter: true },
   { title: '风险等级对比', key: 'risk_level_comparison', width: 170 },
-  { title: '审查状态', key: 'review_status', width: 90 },
-  { title: '重试', key: 'retry_count', width: 60 },
-  { title: '完成时间', key: 'completed_at', width: 160 },
-  { title: '操作', key: 'actions', width: 70, fixed: 'right' }
+  { title: '处理状态', key: 'process_status', width: 90 },
+  { title: '完成时间', key: 'completed_at', width: 160, sorter: true },
+  { title: '操作', key: 'actions', width: 120, fixed: 'right' }
 ]
 
 function getRiskColor(level) {
@@ -335,6 +388,8 @@ function getStatusText(s) { return { pending: '待审查', completed: '已完成
 function getRiskTypeColor(t) { return { '退费': 'orange', '投诉': 'error', '其他': 'default' }[t] || 'default' }
 function getPriorityColor(p) { return { P0: 'error', P1: 'orange', P2: 'blue', P3: 'default' }[p] || 'default' }
 function getTriggerPartyText(t) { return { sales: '销售', customer: '客户', both: '双方' }[t] || t || '-' }
+function getProcessStatusColor(s) { return { pending: 'default', processing: 'processing', resolved: 'success', false_positive: 'warning', escalated: 'error' }[s] || 'default' }
+function getProcessStatusText(s) { return { pending: '待处理', processing: '处理中', resolved: '已处理', false_positive: '误报', escalated: '已升级' }[s] || s || '-' }
 
 function formatDateTime(iso) {
   if (!iso) return '-'
@@ -362,6 +417,10 @@ async function fetchData() {
     if (filters.priorities && filters.priorities.length) params.priority = filters.priorities.join(',')
     if (filters.secondary_risk_levels && filters.secondary_risk_levels.length) params.secondary_risk_level = filters.secondary_risk_levels.join(',')
     if (filters.confirmed !== undefined && filters.confirmed !== null) params.confirmed = filters.confirmed
+    if (sorter.field && sorter.order) {
+      params.sort_field = sorter.field
+      params.sort_order = sorter.order
+    }
     const res = await getReviewList(params)
     data.value = res.data || []
     pagination.total = res.total || 0
@@ -370,7 +429,18 @@ async function fetchData() {
 }
 
 function handleSearch() { pagination.current = 1; fetchData() }
-function handleTableChange(pag) { pagination.current = pag.current; pagination.pageSize = pag.pageSize; fetchData() }
+function handleTableChange(pag, filters, sorter) {
+  pagination.current = pag.current
+  pagination.pageSize = pag.pageSize
+  if (sorter && sorter.field) {
+    sorter.field = sorter.field
+    sorter.order = sorter.order === 'ascend' ? 'asc' : sorter.order === 'descend' ? 'desc' : null
+  } else {
+    sorter.field = null
+    sorter.order = null
+  }
+  fetchData()
+}
 
 async function showDetail(record) {
   try {
@@ -414,6 +484,30 @@ async function saveEdit() {
     fetchData()
   } catch { message.error('保存失败') }
   finally { editLoading.value = false }
+}
+
+function showProcessEdit(record) {
+  processEditRecord.value = record
+  processEditForm.process_status = record.process_status || 'pending'
+  processEditForm.remark = record.remark || ''
+  processEditVisible.value = true
+}
+
+async function saveProcessEdit() {
+  processEditLoading.value = true
+  try {
+    await updateQualityCheckResult(processEditRecord.value.result_id, {
+      process_status: processEditForm.process_status,
+      remark: processEditForm.remark,
+    })
+    message.success('处理状态已更新')
+    processEditVisible.value = false
+    fetchData()
+  } catch (err) {
+    message.error('更新失败: ' + (err.message || '未知错误'))
+  } finally {
+    processEditLoading.value = false
+  }
 }
 
 async function showChatRecords() {

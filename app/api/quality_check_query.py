@@ -15,7 +15,7 @@ from app.models.result import QualityCheckResult, QualityCheckModificationLog, Q
 from app.services.dependencies import require_permission, get_current_user
 from app.services.cache import cache_get, cache_set, cache_delete, cache_clear_pattern
 from app.services.hujing_api import get_chat_records, get_chat_records_for_quality_check
-from config import now_shanghai, settings
+from config import now_shanghai, to_naive_shanghai, settings
 
 _STATS_CACHE_TTL = 300  # 统计缓存：5 分钟
 _STATS_CACHE_KEY = "quality_check:stats"
@@ -795,7 +795,7 @@ async def update_quality_check_result(
             new_risk_level=new_risk_level,
             old_remark=old_remark,
             new_remark=new_remark,
-            modified_at=now_shanghai(),
+            modified_at=to_naive_shanghai(now_shanghai()),
         )
         session.add(log)
 
@@ -803,7 +803,7 @@ async def update_quality_check_result(
         record.remark = new_remark
         record.modified_risk_level = final_modified_risk_level
         record.process_status = new_process_status
-        record.modified_at = now_shanghai()
+        record.modified_at = to_naive_shanghai(now_shanghai())
         record.modified_by = str(current_user["user_id"])
         record.modified_by_name = current_user["username"]
 
