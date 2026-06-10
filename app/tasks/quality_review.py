@@ -79,46 +79,8 @@ def _process_single_review(session: Session, result_id: int, batch_id: str, idx:
         print(f"[batch_review] [{idx}/{total}] result_id={result_id} 不存在，跳过")
         return "skip"
 
-    # === 过期占位检测：has_secondary_review=True 但无 completed 记录 ===
-    # 可能原因：Worker 崩溃/OOM-kill/超时，占位未被释放
-    # 策略：检查是否存在 completed 或近期(< 1小时)的 failed 记录
-    # 若均不存在，视为"过期占位"，重置标记允许重新处理
-    if quality_result.has_secondary_review:
-        existing_review = session.execute(
-            select(QualityReviewResult).where(
-                QualityReviewResult.result_id == result_id,
-                QualityReviewResult.review_status.in_(["completed", "failed"])
-            )
-        ).scalar_one_or_none()
-
-        if existing_review is None:
-            # 无任何审查记录 → 过期占位，重置
-            from datetime import datetime, timedelta
-            # 检查占位时间（通过查看最近一次 modified 时间无法直接获取，
-            # 所以只要没有审查记录就认为可以重新处理）
-            print(f"[batch_review] [{idx}/{total}] result_id={result_id} "
-                  f"检测到过期占位（has_secondary_review=True 但无审查记录），重置标记")
-            quality_result.has_secondary_review = False
-            session.commit()
-            # 继续处理（不 return "skip"，让下面的逻辑正常走）
-        else:
-            print(f"[batch_review] [{idx}/{total}] result_id={result_id} 已审查（标记），跳过")
-            return "skip"
-
-    # 额外检查：是否已存在 completed 的审查记录（防止竞态）
-    existing_completed = session.execute(
-        select(QualityReviewResult).where(
-            QualityReviewResult.result_id == result_id,
-            QualityReviewResult.review_status == "completed"
-        )
-    ).scalar_one_or_none()
-    if existing_completed:
-        print(f"[batch_review] [{idx}/{total}] result_id={result_id} 已有completed审查记录，跳过并修正标记")
-        quality_result.has_secondary_review = True
-        session.commit()
-        return "skip"
-
     # === 原子占位：先占位后处理，防止多 Worker 并发重复调 AI ===
+    # 关键：这是整个函数的第一道防线，必须在任何检查之前执行
     # UPDATE ... WHERE id=? AND has_secondary_review IS NOT TRUE
     # rowcount==1 表示抢占成功，rowcount==0 表示已被其他 Worker 抢占
     claim_result = session.execute(
@@ -139,6 +101,21 @@ def _process_single_review(session: Session, result_id: int, batch_id: str, idx:
         return "skip"
 
     print(f"[batch_review] [{idx}/{total}] result_id={result_id} 占位成功，开始处理")
+
+    # === 占位成功后，检查是否已有 completed 记录（防止重复写入）===
+    # 这一步必须在 claim 之后执行，确保只有一个 Worker 能走到这里
+    existing_completed = session.execute(
+        select(QualityReviewResult).where(
+            QualityReviewResult.result_id == result_id,
+            QualityReviewResult.review_status == "completed"
+        )
+    ).scalar_one_or_none()
+    if existing_completed:
+        print(f"[batch_review] [{idx}/{total}] result_id={result_id} 已有completed审查记录，释放占位并跳过")
+        # 释放占位，让其他 Worker 可以重试（如果有 failed 记录的话）
+        quality_result.has_secondary_review = False
+        session.commit()
+        return "skip"
 
     # 查询详情
     detail_stmt = select(QualityCheckDetail).where(
@@ -367,7 +344,8 @@ def auto_quality_review_consumer(self):
         return {"batch_id": None, "total": 0, "message": "无待审查结果"}
 
     batch_id = str(uuid.uuid4())
-    print(f"[auto_review] 发现 {len(result_ids)} 条未审查结果，委托 batch_quality_review_task 执行")
+    print(f"[auto_review] 发现 {len(result_ids)} 条未审查结果，提交 batch_quality_review_task 到队列")
 
-    # 直接复用 batch_quality_review_task 的核心逻辑（同步调用，不嵌套 Celery 任务）
-    return batch_quality_review_task(result_ids, batch_id)
+    # 异步提交到 Celery 队列，避免并发执行多个批次
+    batch_quality_review_task.delay(result_ids, batch_id)
+    return {"batch_id": batch_id, "total": len(result_ids), "message": "已提交到队列"}
