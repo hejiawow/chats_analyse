@@ -93,7 +93,12 @@
         <template v-if="column.key === 'process_status'">
           <a-tag :color="getProcessStatusColor(record.process_status)">{{ getProcessStatusText(record.process_status) }}</a-tag>
         </template>
-        <template v-if="column.key === 'completed_at'">{{ formatDateTime(record.completed_at) }}</template>
+        <template v-if="column.key === 'completed_at'">
+          <div class="qr-time-cell">
+            <span class="qr-time-date">{{ formatDate(record.completed_at) }}</span>
+            <span class="qr-time-hms">{{ formatTime(record.completed_at) }}</span>
+          </div>
+        </template>
         <template v-if="column.key === 'actions'">
           <a-button type="link" size="small" @click="showDetail(record)">详情</a-button>
           <a-button type="link" size="small" @click="showProcessEdit(record)">人工处理</a-button>
@@ -139,7 +144,7 @@
             </a-descriptions-item>
             <a-descriptions-item label="检测时间">{{ formatDateTime(currentDetail.quality_check_result?.created_at) }}</a-descriptions-item>
           </a-descriptions>
-          <div style="margin-top: 12px">
+          <div class="review-col-footer review-col-footer-left">
             <a-button type="primary" ghost @click="showChatRecords">查看全部聊天记录</a-button>
           </div>
         </div>
@@ -238,6 +243,10 @@
                 <a-textarea v-model:value="editForm.review_reason" :rows="4" placeholder="请输入审查理由" />
               </a-form-item>
             </a-form>
+          </div>
+          <!-- 底部操作栏 -->
+          <div class="review-col-footer">
+            <a-button type="primary" ghost @click="showProcessEditFromDetail">人工处理</a-button>
           </div>
         </div>
       </div>
@@ -368,12 +377,12 @@ const columns = [
   { title: '好友姓名', dataIndex: 'friend_name', key: 'friend_name', width: 100 },
   { title: '是否属退费投诉', key: 'confirmed', width: 110 },
   { title: '初次质检风险', key: 'risk_category', width: 110 },
-  { title: '问题摘要', key: 'issue_summary', width: 200, ellipsis: true },
+  { title: '完成时间', dataIndex: 'completed_at', key: 'completed_at', width: 120, sorter: true },
+  { title: '问题摘要', key: 'issue_summary', width: 220 },
   { title: '二次判定风险', key: 'risk_type', width: 100 },
-  { title: '优先级', key: 'priority', width: 70, sorter: true },
+  { title: '优先级', dataIndex: 'priority', key: 'priority', width: 70, sorter: true },
   { title: '风险等级对比', key: 'risk_level_comparison', width: 170 },
   { title: '处理状态', key: 'process_status', width: 90 },
-  { title: '完成时间', key: 'completed_at', width: 160, sorter: true },
   { title: '操作', key: 'actions', width: 120, fixed: 'right' }
 ]
 
@@ -390,6 +399,22 @@ function getPriorityColor(p) { return { P0: 'error', P1: 'orange', P2: 'blue', P
 function getTriggerPartyText(t) { return { sales: '销售', customer: '客户', both: '双方' }[t] || t || '-' }
 function getProcessStatusColor(s) { return { pending: 'default', processing: 'processing', resolved: 'success', false_positive: 'warning', escalated: 'error' }[s] || 'default' }
 function getProcessStatusText(s) { return { pending: '待处理', processing: '处理中', resolved: '已处理', false_positive: '误报', escalated: '已升级' }[s] || s || '-' }
+
+function formatDate(iso) {
+  if (!iso) return '-'
+  try {
+    const d = new Date(iso)
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+  } catch { return iso }
+}
+
+function formatTime(iso) {
+  if (!iso) return ''
+  try {
+    const d = new Date(iso)
+    return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`
+  } catch { return '' }
+}
 
 function formatDateTime(iso) {
   if (!iso) return '-'
@@ -429,12 +454,12 @@ async function fetchData() {
 }
 
 function handleSearch() { pagination.current = 1; fetchData() }
-function handleTableChange(pag, filters, sorter) {
+function handleTableChange(pag, filters, tableSorter) {
   pagination.current = pag.current
   pagination.pageSize = pag.pageSize
-  if (sorter && sorter.field) {
-    sorter.field = sorter.field
-    sorter.order = sorter.order === 'ascend' ? 'asc' : sorter.order === 'descend' ? 'desc' : null
+  if (tableSorter && tableSorter.field) {
+    sorter.field = tableSorter.field
+    sorter.order = tableSorter.order === 'ascend' ? 'asc' : tableSorter.order === 'descend' ? 'desc' : null
   } else {
     sorter.field = null
     sorter.order = null
@@ -525,6 +550,20 @@ async function showChatRecords() {
   finally { chatLoading.value = false }
 }
 
+function showProcessEditFromDetail() {
+  const d = currentDetail.value
+  if (!d) return
+  const qcr = d.quality_check_result || {}
+  showProcessEdit({
+    result_id: d.result_id,
+    user_name: qcr.user_name,
+    friend_name: qcr.friend_name,
+    issue_summary: qcr.issue_summary,
+    process_status: qcr.process_status || 'pending',
+    remark: '',
+  })
+}
+
 function goToQualityResult(resultId) {
   router.push({ path: '/quality-results', query: { id: resultId } })
 }
@@ -538,10 +577,13 @@ onMounted(() => { fetchData() })
 .review-detail-layout {
   display: flex;
   gap: 20px;
+  align-items: stretch;
 }
 .review-col {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 .review-col-left {
   border-right: 1px solid #f0f0f0;
@@ -590,8 +632,57 @@ onMounted(() => { fetchData() })
   line-height: 1.5;
 }
 
+.review-col-footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.review-col-footer-left {
+  justify-content: flex-start;
+}
+
 .edit-form {
   padding: 0 4px;
+}
+
+/* 表格问题摘要列：小字体、最多两行 */
+.table-risk-desc {
+  font-size: 12px;
+  color: #666;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.4;
+}
+.clickable-summary {
+  cursor: help;
+  border-bottom: 1px dotted #94a3b8;
+}
+.summary-tooltip-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 时间双行展示 */
+.qr-time-cell {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.4;
+}
+.qr-time-date {
+  font-size: 13px;
+  color: #334155;
+}
+.qr-time-hms {
+  font-size: 12px;
+  color: #94a3b8;
 }
 
 /* 聊天记录样式 */

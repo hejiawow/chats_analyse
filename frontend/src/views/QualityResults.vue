@@ -280,6 +280,15 @@
           </a-tooltip>
           <span v-else>-</span>
         </template>
+        <template v-if="column.key === 'chat_title'">
+          <a-tooltip v-if="record.chat_title" placement="topLeft" :overlayStyle="{ maxWidth: '400px' }">
+            <template #title>
+              <span>{{ record.chat_title }}</span>
+            </template>
+            <span class="table-chat-title">{{ record.chat_title }}</span>
+          </a-tooltip>
+          <span v-else>-</span>
+        </template>
         <template v-if="column.key === 'action_priority'">
           <a-tag :color="getPriorityColor(record.action_priority)">
             {{ getPriorityText(record.action_priority) }}
@@ -630,7 +639,7 @@ const allColumns = [
   { title: '销售', key: 'user_name', minWidth: 130, ellipsis: true, fixed: 'left' },
   { title: '好友', key: 'friend_name', minWidth: 130, ellipsis: true },
   { title: '时间', dataIndex: 'created_at', key: 'created_at', minWidth: 120, ellipsis: true, sorter: true },
-  { title: '好友备注', dataIndex: 'chat_title', key: 'chat_title', minWidth: 120, ellipsis: true },
+  { title: '好友备注', dataIndex: 'chat_title', key: 'chat_title', width: 130 },
   { title: '好友别名', dataIndex: 'alias', key: 'alias', minWidth: 120, ellipsis: true },
   { title: '绑定手机号', dataIndex: 'phone', key: 'phone', minWidth: 130, ellipsis: true },
   { title: '备注手机号', dataIndex: 'remark_phone', key: 'remark_phone', minWidth: 130, ellipsis: true },
@@ -1771,6 +1780,21 @@ onMounted(() => {
 .qr-time-hms {
   font-size: 12px;
   color: #94a3b8;
+}
+
+/* 表格好友备注列：小字体、最多两行 */
+.table-chat-title {
+  font-size: 12px;
+  color: #555;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.4;
+  cursor: help;
 }
 
 /* 表格风险描述列：小字体、最多两行 */
