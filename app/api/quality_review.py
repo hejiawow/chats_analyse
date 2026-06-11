@@ -250,19 +250,13 @@ async def instant_quality_review(
 
         key_evidence = detail.key_evidence if detail else []
 
-        # 4. 获取聊天记录（从任务表获取 end_time）
-        task_end_time = "2099-12-31 23:59:59"
-        if quality_result.task_id:
-            task_stmt = select(QualityCheckTask).where(QualityCheckTask.id == quality_result.task_id)
-            task_result = await session.execute(task_stmt)
-            task = task_result.scalar_one_or_none()
-            if task and task.end_time:
-                task_end_time = task.end_time
+        # 4. 获取聊天记录（以当前时间为截止点，审查需基于最新聊天记录）
+        now_str = to_naive_shanghai(now_shanghai()).strftime("%Y-%m-%d %H:%M:%S")
 
         chat_records = get_chat_records_for_quality_check(
             user_id=quality_result.user_id,
             friend_id=quality_result.friend_id,
-            end_time=task_end_time,
+            end_time=now_str,
         )
 
         # 5. 同步调用二次审查Agent（放入线程池，避免阻塞事件循环）

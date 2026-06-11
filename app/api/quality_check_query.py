@@ -631,9 +631,9 @@ async def get_quality_check_chat_records(
 ):
     """获取质检结果对应的全部聊天记录
 
-    使用与分析时相同的查询逻辑（get_chat_records_for_quality_check），
-    即 end_time 往前推 QUALITY_CHECK_CHAT_DAYS 天，并截取最新 QUALITY_CHECK_MAX_CHAT_RECORDS 条，
-    确保展示的聊天记录与 AI 分析时完全一致。
+    以当前时间为截止点，往前推 QUALITY_CHECK_CHAT_DAYS 天，
+    截取最新 QUALITY_CHECK_MAX_CHAT_RECORDS 条。
+    审核人员需要基于最新聊天记录做出判断。
     """
     async with async_session() as session:
         stmt = select(QualityCheckResult).where(QualityCheckResult.id == result_id)
@@ -643,35 +643,25 @@ async def get_quality_check_chat_records(
         if not record:
             return {"error": "记录不存在"}
 
-        # 从任务表获取 end_time
-        task_end_time = None
-        if record.task_id:
-            task_stmt = select(QualityCheckTask).where(QualityCheckTask.id == record.task_id)
-            task_result = await session.execute(task_stmt)
-            task = task_result.scalar_one_or_none()
-            if task:
-                task_end_time = task.end_time
+        # 以当前时间为截止点，审核人员需要看到最新聊天记录
+        now_str = to_naive_shanghai(now_shanghai()).strftime("%Y-%m-%d %H:%M:%S")
 
-        # 使用与分析时相同的查询函数：end_time 往前推 QUALITY_CHECK_CHAT_DAYS 天 + 条数限制
         chat_records = get_chat_records_for_quality_check(
             user_id=record.user_id,
             friend_id=record.friend_id,
-            end_time=task_end_time or "2099-12-31 23:59:59",
+            end_time=now_str,
         )
 
-        # 计算实际查询时间范围（与分析时一致）
-        if task_end_time:
-            end_dt = datetime.strptime(task_end_time, "%Y-%m-%d %H:%M:%S")
-            actual_start = (end_dt - timedelta(days=settings.QUALITY_CHECK_CHAT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            actual_start = None
+        # 计算实际查询时间范围
+        end_dt = datetime.strptime(now_str, "%Y-%m-%d %H:%M:%S")
+        actual_start = (end_dt - timedelta(days=settings.QUALITY_CHECK_CHAT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
 
         return {
             "total": len(chat_records),
             "data": chat_records,
             "time_range": {
                 "start": actual_start,
-                "end": task_end_time,
+                "end": now_str,
             },
         }
 

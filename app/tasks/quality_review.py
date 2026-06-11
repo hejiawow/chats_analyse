@@ -128,18 +128,13 @@ def _process_single_review(session: Session, result_id: int, batch_id: str, idx:
           f"关键证据={len(key_evidence)}条, raw_response={'有' if has_raw_response else '无'}, "
           f"user={quality_result.user_id}, friend={quality_result.friend_id}")
 
-    # 获取聊天记录（从任务表查询真实检测时间）
-    task_end_time = "2099-12-31 23:59:59"
-    if quality_result.task_id:
-        task_stmt = select(QualityCheckTask).where(QualityCheckTask.id == quality_result.task_id)
-        task = session.execute(task_stmt).scalar_one_or_none()
-        if task and task.end_time:
-            task_end_time = task.end_time
-    print(f"[batch_review] [{idx}/{total}] result_id={result_id} 获取聊天记录 (end_time={task_end_time})...")
+    # 获取聊天记录（以当前时间为截止点，审查需基于最新聊天记录）
+    now_str = to_naive_shanghai(now_shanghai()).strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[batch_review] [{idx}/{total}] result_id={result_id} 获取聊天记录 (end_time={now_str})...")
     chat_records = get_chat_records_for_quality_check(
         user_id=quality_result.user_id,
         friend_id=quality_result.friend_id,
-        end_time=task_end_time,
+        end_time=now_str,
     )
     print(f"[batch_review] [{idx}/{total}] result_id={result_id} 获取到 {len(chat_records)} 条聊天记录")
 
