@@ -139,6 +139,9 @@
             <a-descriptions-item label="销售">{{ currentDetail.quality_check_result?.user_name || '-' }} ({{ currentDetail.quality_check_result?.user_id || '-' }})</a-descriptions-item>
             <a-descriptions-item label="好友">{{ currentDetail.quality_check_result?.friend_name || '-' }} ({{ currentDetail.quality_check_result?.friend_id || '-' }})</a-descriptions-item>
             <a-descriptions-item label="好友备注">{{ currentDetail.quality_check_result?.chat_title || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="好友别名">{{ currentDetail.quality_check_result?.alias || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="绑定手机号">{{ currentDetail.quality_check_result?.phone || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="备注手机号">{{ currentDetail.quality_check_result?.remark_phone || '-' }}</a-descriptions-item>
             <a-descriptions-item label="风险等级">
               <a-tag :color="getRiskColor(currentDetail.quality_check_result?.modified_risk_level || currentDetail.quality_check_result?.risk_level)">
                 {{ getRiskText(currentDetail.quality_check_result?.modified_risk_level || currentDetail.quality_check_result?.risk_level) }}
@@ -270,6 +273,7 @@
           <!-- 底部操作栏 -->
           <div class="review-col-footer">
             <a-button type="primary" ghost @click="showProcessEditFromDetail">人工处理</a-button>
+            <a-button type="primary" @click="processNext">处理下一条</a-button>
           </div>
         </div>
       </div>
@@ -300,7 +304,7 @@
     </a-modal>
 
     <!-- 人工处理弹窗 -->
-    <a-modal v-model:open="processEditVisible" title="人工处理" width="600px" :footer="null" style="top: 20px">
+    <a-modal v-model:open="processEditVisible" title="人工处理" width="600px" :footer="null" :zIndex="1100" style="top: 20px">
       <div v-if="processEditRecord" style="padding: 16px 0">
         <a-descriptions :column="1" size="small" bordered :label-style="{ width: '100px', minWidth: '100px' }" style="margin-bottom: 16px">
           <a-descriptions-item label="质检ID">{{ processEditRecord.result_id }}</a-descriptions-item>
@@ -380,6 +384,7 @@ const tabCounts = reactive({
   pending: 0,
   processing: 0,
   resolved: 0,
+  false_positive: 0,
   escalated: 0,
 })
 const tabs = computed(() => [
@@ -387,6 +392,7 @@ const tabs = computed(() => [
   { key: 'pending', label: '待处理', count: tabCounts.pending },
   { key: 'processing', label: '处理中', count: tabCounts.processing },
   { key: 'resolved', label: '已处理', count: tabCounts.resolved },
+  { key: 'false_positive', label: '误报', count: tabCounts.false_positive },
   { key: 'escalated', label: '已升级', count: tabCounts.escalated },
 ])
 
@@ -518,7 +524,7 @@ async function fetchTabCounts() {
     const allRes = await getReviewList({ ...base, page: 1, page_size: 1 })
     tabCounts.all = allRes.total || 0
 
-    const statuses = ['pending', 'processing', 'resolved', 'escalated']
+    const statuses = ['pending', 'processing', 'resolved', 'false_positive', 'escalated']
     await Promise.all(statuses.map(async (status) => {
       const res = await getReviewList({ ...base, page: 1, page_size: 1, process_status: status })
       tabCounts[status] = res.total || 0
@@ -623,6 +629,35 @@ async function showChatRecords() {
     chatTimeRange.value = res.time_range || null
   } catch { chatData.value = [] }
   finally { chatLoading.value = false }
+}
+
+async function processNext() {
+  if (!currentDetail.value) return
+  const currentId = currentDetail.value.id
+  const currentIndex = data.value.findIndex(item => item.id === currentId)
+
+  // 检查是否有下一条
+  if (currentIndex === -1 || currentIndex >= data.value.length - 1) {
+    message.info('没有更多数据了')
+    detailVisible.value = false
+    return
+  }
+
+  // 获取下一条记录
+  const nextRecord = data.value[currentIndex + 1]
+
+  // 关闭当前弹窗
+  detailVisible.value = false
+
+  // 打开下一条
+  try {
+    const res = await getReviewDetail(nextRecord.id)
+    currentDetail.value = res || nextRecord
+  } catch {
+    currentDetail.value = nextRecord
+  }
+  editMode.value = false
+  detailVisible.value = true
 }
 
 function showProcessEditFromDetail() {
