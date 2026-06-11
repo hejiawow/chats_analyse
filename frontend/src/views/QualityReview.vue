@@ -39,6 +39,15 @@
             <a-select-option :value="false">否</a-select-option>
           </a-select>
         </a-form-item>
+        <a-form-item label="审查时间">
+          <a-range-picker
+            v-model:value="filters.timeRange"
+            :show-time="{ format: 'HH:mm:ss' }"
+            format="YYYY-MM-DD HH:mm:ss"
+            :placeholder="['开始', '结束']"
+            style="width: 280px"
+          />
+        </a-form-item>
         <a-form-item>
           <a-button type="primary" @click="handleSearch">查询</a-button>
         </a-form-item>
@@ -347,6 +356,7 @@ const filters = reactive({
   priorities: [],
   secondary_risk_levels: [],
   confirmed: true,
+  timeRange: null,
 })
 
 const pagination = reactive({
@@ -377,7 +387,7 @@ const columns = [
   { title: '好友姓名', dataIndex: 'friend_name', key: 'friend_name', width: 100 },
   { title: '是否属退费投诉', key: 'confirmed', width: 110 },
   { title: '初次质检风险', key: 'risk_category', width: 110 },
-  { title: '完成时间', dataIndex: 'completed_at', key: 'completed_at', width: 120, sorter: true },
+  { title: '审查时间', dataIndex: 'completed_at', key: 'completed_at', width: 120, sorter: true },
   { title: '问题摘要', key: 'issue_summary', width: 220 },
   { title: '二次判定风险', key: 'risk_type', width: 100 },
   { title: '优先级', dataIndex: 'priority', key: 'priority', width: 70, sorter: true },
@@ -442,6 +452,10 @@ async function fetchData() {
     if (filters.priorities && filters.priorities.length) params.priority = filters.priorities.join(',')
     if (filters.secondary_risk_levels && filters.secondary_risk_levels.length) params.secondary_risk_level = filters.secondary_risk_levels.join(',')
     if (filters.confirmed !== undefined && filters.confirmed !== null) params.confirmed = filters.confirmed
+    if (filters.timeRange && filters.timeRange.length === 2) {
+      params.start_time = filters.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
+      params.end_time = filters.timeRange[1].format('YYYY-MM-DD HH:mm:ss')
+    }
     if (sorter.field && sorter.order) {
       params.sort_field = sorter.field
       params.sort_order = sorter.order
@@ -573,6 +587,7 @@ onMounted(() => { fetchData() })
 
 <style scoped>
 .quality-review { padding: 0; }
+.quality-review :deep(.ant-form-inline .ant-form-item) { margin-bottom: 12px; }
 
 .review-detail-layout {
   display: flex;

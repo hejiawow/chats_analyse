@@ -76,8 +76,12 @@ async def auto_batch_quality_review(
 
 
 def _apply_review_filters(stmt, count_stmt, result_id, review_status, batch_id,
-                           secondary_risk_level, risk_type, priority, confirmed):
+                           secondary_risk_level, risk_type, priority, confirmed,
+                           start_time=None, end_time=None):
     """为审查结果查询的主查询和 count 查询同时应用所有过滤条件"""
+    from sqlalchemy import cast, Date
+    from datetime import datetime
+
     if result_id:
         stmt = stmt.where(QualityReviewResult.result_id == result_id)
         count_stmt = count_stmt.where(QualityReviewResult.result_id == result_id)
@@ -111,6 +115,21 @@ def _apply_review_filters(stmt, count_stmt, result_id, review_status, batch_id,
     if confirmed is not None:
         stmt = stmt.where(QualityReviewResult.confirmed == confirmed)
         count_stmt = count_stmt.where(QualityReviewResult.confirmed == confirmed)
+    # 时间范围筛选（基于审查完成时间）
+    if start_time:
+        try:
+            start_dt = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
+            stmt = stmt.where(QualityReviewResult.completed_at >= start_dt)
+            count_stmt = count_stmt.where(QualityReviewResult.completed_at >= start_dt)
+        except ValueError:
+            pass
+    if end_time:
+        try:
+            end_dt = datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
+            stmt = stmt.where(QualityReviewResult.completed_at <= end_dt)
+            count_stmt = count_stmt.where(QualityReviewResult.completed_at <= end_dt)
+        except ValueError:
+            pass
     return stmt, count_stmt
 
 
@@ -297,6 +316,8 @@ async def query_quality_review_results(
     risk_type: str | None = Query(None, description="风险类型：退费/投诉/其他"),
     priority: str | None = Query(None, description="优先级：P0/P1/P2/P3"),
     confirmed: bool | None = Query(None, description="是否确认涉及退费或投诉"),
+    start_time: str | None = Query(None, description="审查时间范围-开始（YYYY-MM-DD HH:MM:SS）"),
+    end_time: str | None = Query(None, description="审查时间范围-结束（YYYY-MM-DD HH:MM:SS）"),
     sort_field: str | None = Query(None, description="排序字段：completed_at, priority"),
     sort_order: str | None = Query("desc", description="排序方向：asc/desc"),
     page: int = Query(1, ge=1),
@@ -327,7 +348,8 @@ async def query_quality_review_results(
         # 应用所有过滤条件
         stmt, count_stmt = _apply_review_filters(
             stmt, count_stmt, result_id, review_status, batch_id,
-            secondary_risk_level, risk_type, priority, confirmed
+            secondary_risk_level, risk_type, priority, confirmed,
+            start_time, end_time
         )
 
         total = await session.scalar(count_stmt)
