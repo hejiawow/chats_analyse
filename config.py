@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # AI (DashScope)
     DASHSCOPE_API_KEY: str = ""
     AI_MODEL: str = "qwen-plus"
-    AI_API_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    AI_API_URL: str = "https://coding.dashscope.aliyuncs.com/v1"
 
     # AI Concurrency Control (分布式信号量限制并发调用)
     AI_MAX_CONCURRENT: int = 2  # 最大并发 AI 调用数（免费版 DashScope 只允许 1）
@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     DATABASE_URL_SYNC: str = ""
 
     # Quality Check
-    QUALITY_CHECK_CHAT_DAYS: int = 7
+    QUALITY_CHECK_CHAT_DAYS: int = 1
     QUALITY_CHECK_MAX_CHAT_RECORDS: int = 500
 
     # JWT
@@ -71,6 +71,24 @@ class Settings(BaseSettings):
 
     # Open API
     OPEN_API_KEY: str = ""
+
+    # Open API
+    OPEN_API_KEY: str = ""
+
+    # 沟通记录 API（新数据源）
+    COMMUNICATION_APP_ID: str = ""
+    COMMUNICATION_API_BASE_URL: str = ""   # 接口 base URL
+    COMMUNICATION_API_KEY: str = ""        # 认证 key（如有）
+
+    # Open API (外部开放接口)
+    OPEN_API_KEY: str = ""
+
+    # 钉钉在线表格 API
+    DINGTALK_APP_KEY: str = "dingekyob2fik3fimq8b"
+    DINGTALK_APP_SECRET: str = "hq5gQJ9a5_i-UGyaXn9dO1CkP8JgeAtWMrhr6w8dUyLhntObwIiy3AVUiAVU7Irf"
+    DINGTALK_WORKBOOK_ID: str = "NDoBb60VLQbn5w4aCBpy9dk0JlemrZQ3"
+    DINGTALK_SHEET_ID: str = "Sheet1"
+    DINGTALK_OPERATOR_UNION_ID: str = "hZii1zd5NF1xiiXQp8MYLp0wiEiE"
 
     class Config:
         env_file = ".env"
