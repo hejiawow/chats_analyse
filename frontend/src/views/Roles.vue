@@ -75,7 +75,7 @@ const allPermissions = [
   { value: 'read:journey', label: '查看成交案例' },
   { value: 'read:followup', label: '查看督学合规' },
   { value: 'read:quality_check', label: '查看质检结果' },
-  { value: 'write:quality_check', label: '触发质检分析' },
+  { value: 'update:quality_check', label: '人工处理质检结果（修改状态/备注/风险等级）' },
   { value: 'read:quality_review', label: '查看二次审查结果' },
   { value: 'write:quality_review', label: '执行二次审查操作' },
   { value: 'read:scriptlib', label: '查看话术库' },
