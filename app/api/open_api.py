@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Security
-from fastapi.security import APIKeyHeader
+# from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
 from config import settings
@@ -18,35 +18,35 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # API Key 鉴权：通过 X-API-Key 请求头传递
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-
+# _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+#
+#
 def _get_client_ip(request: Request) -> str:
     """获取客户端真实 IP"""
     return request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
-
-
-async def _verify_api_key(request: Request, api_key: str | None = Security(_api_key_header)) -> str:
-    """校验请求头中的 API Key 是否与配置一致"""
-    if not settings.OPEN_API_KEY:
-        raise HTTPException(status_code=503, detail="开放接口未配置，请联系管理员")
-    if not api_key or not secrets.compare_digest(api_key, settings.OPEN_API_KEY):
-        # 记录鉴权失败日志
-        await log_service.write_log(
-            log_type="audit",
-            log_level="warning",
-            request_method=request.method,
-            request_path=str(request.url.path),
-            response_status=401,
-            ip_address=_get_client_ip(request),
-            user_agent=request.headers.get("User-Agent", "")[:500],
-            action="open_api_auth_failed",
-            resource_type="open_api",
-            extra_data={"provided_key_prefix": api_key[:8] + "..." if api_key and len(api_key) > 8 else api_key},
-            immediate=True,
-        )
-        raise HTTPException(status_code=401, detail="API Key 无效")
-    return api_key
+#
+#
+# async def _verify_api_key(request: Request, api_key: str | None = Security(_api_key_header)) -> str:
+#     """校验请求头中的 API Key 是否与配置一致"""
+#     if not settings.OPEN_API_KEY:
+#         raise HTTPException(status_code=503, detail="开放接口未配置，请联系管理员")
+#     if not api_key or not secrets.compare_digest(api_key, settings.OPEN_API_KEY):
+#         # 记录鉴权失败日志
+#         await log_service.write_log(
+#             log_type="audit",
+#             log_level="warning",
+#             request_method=request.method,
+#             request_path=str(request.url.path),
+#             response_status=401,
+#             ip_address=_get_client_ip(request),
+#             user_agent=request.headers.get("User-Agent", "")[:500],
+#             action="open_api_auth_failed",
+#             resource_type="open_api",
+#             extra_data={"provided_key_prefix": api_key[:8] + "..." if api_key and len(api_key) > 8 else api_key},
+#             immediate=True,
+#         )
+#         raise HTTPException(status_code=401, detail="API Key 无效")
+#     return api_key
 
 
 # ── 请求 / 响应模型 ──────────────────────────────
@@ -68,7 +68,7 @@ class OpenApiResponse(BaseModel):
 async def echo(
     req: OpenApiRequest,
     request: Request,
-    _api_key: str = Security(_verify_api_key),
+    # _api_key: str = Security(_verify_api_key),
 ):
     """回显接口 — 将传入的 data 原样返回，用于联调验证"""
     start_time = time.time()
