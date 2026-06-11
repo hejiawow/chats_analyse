@@ -77,7 +77,7 @@ async def auto_batch_quality_review(
 
 def _apply_review_filters(stmt, count_stmt, result_id, review_status, batch_id,
                            secondary_risk_level, risk_type, priority, confirmed,
-                           start_time=None, end_time=None):
+                           process_status=None, start_time=None, end_time=None):
     """为审查结果查询的主查询和 count 查询同时应用所有过滤条件"""
     from sqlalchemy import cast, Date
     from datetime import datetime
@@ -115,6 +115,13 @@ def _apply_review_filters(stmt, count_stmt, result_id, review_status, batch_id,
     if confirmed is not None:
         stmt = stmt.where(QualityReviewResult.confirmed == confirmed)
         count_stmt = count_stmt.where(QualityReviewResult.confirmed == confirmed)
+    # 人工处理状态筛选
+    if process_status:
+        statuses = [s.strip() for s in process_status.split(',') if s.strip()]
+        if statuses:
+            condition = QualityCheckResult.process_status == statuses[0] if len(statuses) == 1 else QualityCheckResult.process_status.in_(statuses)
+            stmt = stmt.where(condition)
+            count_stmt = count_stmt.where(condition)
     # 时间范围筛选（基于审查完成时间）
     if start_time:
         try:
@@ -310,6 +317,7 @@ async def query_quality_review_results(
     risk_type: str | None = Query(None, description="风险类型：退费/投诉/其他"),
     priority: str | None = Query(None, description="优先级：P0/P1/P2/P3"),
     confirmed: bool | None = Query(None, description="是否确认涉及退费或投诉"),
+    process_status: str | None = Query(None, description="人工处理状态：pending/processing/resolved/false_positive/escalated"),
     start_time: str | None = Query(None, description="审查时间范围-开始（YYYY-MM-DD HH:MM:SS）"),
     end_time: str | None = Query(None, description="审查时间范围-结束（YYYY-MM-DD HH:MM:SS）"),
     sort_field: str | None = Query(None, description="排序字段：completed_at, priority"),
@@ -336,14 +344,18 @@ async def query_quality_review_results(
             .outerjoin(QualityCheckResult, QualityReviewResult.result_id == QualityCheckResult.id)
         )
 
-        # 总数统计
-        count_stmt = select(func.count()).select_from(QualityReviewResult)
+        # 总数统计（需要 JOIN 以支持 process_status 等质检表筛选）
+        count_stmt = (
+            select(func.count())
+            .select_from(QualityReviewResult)
+            .outerjoin(QualityCheckResult, QualityReviewResult.result_id == QualityCheckResult.id)
+        )
 
         # 应用所有过滤条件
         stmt, count_stmt = _apply_review_filters(
             stmt, count_stmt, result_id, review_status, batch_id,
             secondary_risk_level, risk_type, priority, confirmed,
-            start_time, end_time
+            process_status, start_time, end_time
         )
 
         total = await session.scalar(count_stmt)

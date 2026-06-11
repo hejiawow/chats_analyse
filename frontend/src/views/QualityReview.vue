@@ -3,13 +3,6 @@
     <!-- 筛选区 -->
     <a-card :bordered="false" style="margin-bottom: 16px">
       <a-form layout="inline" :model="filters">
-        <a-form-item label="审查状态">
-          <a-select v-model:value="filters.review_status" placeholder="全部" style="width: 120px" allowClear>
-            <a-select-option value="completed">已完成</a-select-option>
-            <a-select-option value="failed">失败</a-select-option>
-            <a-select-option value="pending">待审查</a-select-option>
-          </a-select>
-        </a-form-item>
         <a-form-item label="风险类型">
           <a-select v-model:value="filters.risk_types" mode="multiple" placeholder="全部" style="width: 200px" allowClear :maxTagCount="2">
             <a-select-option value="退费">退费</a-select-option>
@@ -39,6 +32,15 @@
             <a-select-option :value="false">否</a-select-option>
           </a-select>
         </a-form-item>
+        <a-form-item label="人工处理状态">
+          <a-select v-model:value="filters.process_statuses" mode="multiple" placeholder="全部" style="width: 260px" allowClear :maxTagCount="2">
+            <a-select-option value="pending">待处理</a-select-option>
+            <a-select-option value="processing">处理中</a-select-option>
+            <a-select-option value="resolved">已处理</a-select-option>
+            <a-select-option value="false_positive">误报</a-select-option>
+            <a-select-option value="escalated">已升级</a-select-option>
+          </a-select>
+        </a-form-item>
         <a-form-item label="审查时间">
           <a-range-picker
             v-model:value="filters.timeRange"
@@ -52,6 +54,18 @@
           <a-button type="primary" @click="handleSearch">查询</a-button>
         </a-form-item>
       </a-form>
+    </a-card>
+
+    <!-- 快速筛选 Tabs -->
+    <a-card :bordered="false" style="margin-bottom: 16px">
+      <a-tabs v-model:activeKey="activeTab" @change="onTabChange">
+        <a-tab-pane v-for="tab in tabs" :key="tab.key">
+          <template #tab>
+            {{ tab.label }}
+            <a-badge v-if="tab.count > 0" :count="tab.count" :offset="[8, -2]" />
+          </template>
+        </a-tab-pane>
+      </a-tabs>
     </a-card>
 
     <!-- 表格 -->
@@ -320,7 +334,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { getReviewList, getReviewDetail, updateReviewDetail, getReviewChatRecords } from '@/api/qualityreview'
@@ -351,13 +365,38 @@ const chatData = ref([])
 const chatTimeRange = ref(null)
 
 const filters = reactive({
-  review_status: undefined,
   risk_types: [],
   priorities: [],
   secondary_risk_levels: [],
   confirmed: true,
+  process_statuses: [],
   timeRange: null,
 })
+
+// 快速筛选 Tabs
+const activeTab = ref('all')
+const tabCounts = reactive({
+  all: 0,
+  pending: 0,
+  processing: 0,
+  resolved: 0,
+  escalated: 0,
+})
+const tabs = computed(() => [
+  { key: 'all', label: '全部', count: tabCounts.all },
+  { key: 'pending', label: '待处理', count: tabCounts.pending },
+  { key: 'processing', label: '处理中', count: tabCounts.processing },
+  { key: 'resolved', label: '已处理', count: tabCounts.resolved },
+  { key: 'escalated', label: '已升级', count: tabCounts.escalated },
+])
+
+function onTabChange(key) {
+  activeTab.value = key
+  // 根据 tab 设置 process_statuses
+  filters.process_statuses = key === 'all' ? [] : [key]
+  pagination.current = 1
+  fetchData()
+}
 
 const pagination = reactive({
   current: 1,
@@ -446,16 +485,8 @@ function shouldShowTime(idx) {
 async function fetchData() {
   loading.value = true
   try {
-    const params = { page: pagination.current, page_size: pagination.pageSize }
-    if (filters.review_status) params.review_status = filters.review_status
-    if (filters.risk_types && filters.risk_types.length) params.risk_type = filters.risk_types.join(',')
-    if (filters.priorities && filters.priorities.length) params.priority = filters.priorities.join(',')
-    if (filters.secondary_risk_levels && filters.secondary_risk_levels.length) params.secondary_risk_level = filters.secondary_risk_levels.join(',')
-    if (filters.confirmed !== undefined && filters.confirmed !== null) params.confirmed = filters.confirmed
-    if (filters.timeRange && filters.timeRange.length === 2) {
-      params.start_time = filters.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
-      params.end_time = filters.timeRange[1].format('YYYY-MM-DD HH:mm:ss')
-    }
+    const params = { ...buildBaseParams(), page: pagination.current, page_size: pagination.pageSize }
+    if (filters.process_statuses && filters.process_statuses.length) params.process_status = filters.process_statuses.join(',')
     if (sorter.field && sorter.order) {
       params.sort_field = sorter.field
       params.sort_order = sorter.order
@@ -467,7 +498,37 @@ async function fetchData() {
   finally { loading.value = false }
 }
 
-function handleSearch() { pagination.current = 1; fetchData() }
+function buildBaseParams() {
+  const params = { review_status: 'completed' }
+  if (filters.risk_types && filters.risk_types.length) params.risk_type = filters.risk_types.join(',')
+  if (filters.priorities && filters.priorities.length) params.priority = filters.priorities.join(',')
+  if (filters.secondary_risk_levels && filters.secondary_risk_levels.length) params.secondary_risk_level = filters.secondary_risk_levels.join(',')
+  if (filters.confirmed !== undefined && filters.confirmed !== null) params.confirmed = filters.confirmed
+  if (filters.timeRange && filters.timeRange.length === 2) {
+    params.start_time = filters.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
+    params.end_time = filters.timeRange[1].format('YYYY-MM-DD HH:mm:ss')
+  }
+  return params
+}
+
+async function fetchTabCounts() {
+  try {
+    const base = buildBaseParams()
+    // 「全部」tab：不带 process_status
+    const allRes = await getReviewList({ ...base, page: 1, page_size: 1 })
+    tabCounts.all = allRes.total || 0
+
+    const statuses = ['pending', 'processing', 'resolved', 'escalated']
+    await Promise.all(statuses.map(async (status) => {
+      const res = await getReviewList({ ...base, page: 1, page_size: 1, process_status: status })
+      tabCounts[status] = res.total || 0
+    }))
+  } catch (e) {
+    console.error('Failed to fetch tab counts:', e)
+  }
+}
+
+function handleSearch() { pagination.current = 1; fetchData(); fetchTabCounts() }
 function handleTableChange(pag, filters, tableSorter) {
   pagination.current = pag.current
   pagination.pageSize = pag.pageSize
@@ -582,12 +643,17 @@ function goToQualityResult(resultId) {
   router.push({ path: '/quality-results', query: { id: resultId } })
 }
 
-onMounted(() => { fetchData() })
+onMounted(() => { fetchData(); fetchTabCounts() })
 </script>
 
 <style scoped>
 .quality-review { padding: 0; }
 .quality-review :deep(.ant-form-inline .ant-form-item) { margin-bottom: 12px; }
+
+/* 快速筛选 tabs */
+.quality-review :deep(.ant-tabs-nav) { margin-bottom: 0; }
+.quality-review :deep(.ant-tabs-tab) { padding: 8px 16px; }
+.quality-review :deep(.ant-badge) { margin-left: 4px; }
 
 .review-detail-layout {
   display: flex;

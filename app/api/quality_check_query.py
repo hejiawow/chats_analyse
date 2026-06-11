@@ -631,9 +631,9 @@ async def get_quality_check_chat_records(
 ):
     """获取质检结果对应的全部聊天记录
 
-    以当前时间为截止点，往前推 QUALITY_CHECK_CHAT_DAYS 天，
-    截取最新 QUALITY_CHECK_MAX_CHAT_RECORDS 条。
-    审核人员需要基于最新聊天记录做出判断。
+    开始时间：质检分析时拉取聊天记录的原始时间（发送给大模型的聊天记录起始时间）
+    截止时间：当前最新时间
+    审核人员可以看到从分析时期到现在的全部聊天记录。
     """
     async with async_session() as session:
         stmt = select(QualityCheckResult).where(QualityCheckResult.id == result_id)
@@ -643,24 +643,36 @@ async def get_quality_check_chat_records(
         if not record:
             return {"error": "记录不存在"}
 
-        # 以当前时间为截止点，审核人员需要看到最新聊天记录
+        # 截止时间：当前最新时间
         now_str = to_naive_shanghai(now_shanghai()).strftime("%Y-%m-%d %H:%M:%S")
 
-        chat_records = get_chat_records_for_quality_check(
+        # 开始时间：优先使用质检任务原始的起始时间，兜底用当前时间往前推 QUALITY_CHECK_CHAT_DAYS 天
+        start_time_str = None
+        if record.task_id:
+            task_stmt = select(QualityCheckTask).where(QualityCheckTask.id == record.task_id)
+            task_result = await session.execute(task_stmt)
+            task = task_result.scalar_one_or_none()
+            if task and task.end_time:
+                end_dt = datetime.strptime(task.end_time, "%Y-%m-%d %H:%M:%S")
+                start_dt = end_dt - timedelta(days=settings.QUALITY_CHECK_CHAT_DAYS)
+                start_time_str = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        if not start_time_str:
+            end_dt = datetime.strptime(now_str, "%Y-%m-%d %H:%M:%S")
+            start_time_str = (end_dt - timedelta(days=settings.QUALITY_CHECK_CHAT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+
+        chat_records = get_chat_records(
             user_id=record.user_id,
-            friend_id=record.friend_id,
+            friend_id=int(record.friend_id),
+            start_time=start_time_str,
             end_time=now_str,
         )
-
-        # 计算实际查询时间范围
-        end_dt = datetime.strptime(now_str, "%Y-%m-%d %H:%M:%S")
-        actual_start = (end_dt - timedelta(days=settings.QUALITY_CHECK_CHAT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
 
         return {
             "total": len(chat_records),
             "data": chat_records,
             "time_range": {
-                "start": actual_start,
+                "start": start_time_str,
                 "end": now_str,
             },
         }
