@@ -77,6 +77,15 @@ async def echo(
     logger.info(f"[OpenAPI] callLog 被调用, ip={ip_address}, data_type={type(req.data).__name__}")
 
     try:
+        # 读取客户端完整 JSON 请求体（整段报文，包含外层 data 结构）
+        full_raw_body = await request.json()
+        # 序列化为字符串，保留中文，限制长度避免日志过大（沿用原有2000字符截断规则）
+        full_request_body = json.dumps(full_raw_body, ensure_ascii=False)[:2000]
+    except Exception:
+        # 兼容非标准JSON、空请求体等异常场景
+        full_request_body = ""
+
+    try:
         response = OpenApiResponse(data={})
         elapsed_ms = int((time.time() - start_time) * 1000)
 
@@ -86,7 +95,7 @@ async def echo(
             log_level="info",
             request_method="POST",
             request_path="/open-api/callLog",
-            request_body=json.dumps(req.data, ensure_ascii=False)[:2000],
+            request_body=full_request_body,
             response_status=200,
             response_time_ms=elapsed_ms,
             ip_address=ip_address,
@@ -108,7 +117,7 @@ async def echo(
             log_level="error",
             request_method="POST",
             request_path="/open-api/callLog",
-            request_body=json.dumps(req.data, ensure_ascii=False)[:2000],
+            request_body=full_request_body,
             response_status=500,
             response_time_ms=elapsed_ms,
             ip_address=ip_address,
