@@ -5,7 +5,13 @@ from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 
 from app.models.database import Base
-from config import now_shanghai
+from config import now_shanghai, to_naive_shanghai
+
+
+# 时区无关的当前时间函数（用于数据库默认值）
+def _naive_now():
+    """返回不带时区的当前时间（东八区）"""
+    return to_naive_shanghai(now_shanghai())
 
 
 class ReferralResult(Base):
@@ -480,6 +486,34 @@ class QualityCheckDetail(Base):
     __table_args__ = (
         Index("ix_quality_check_detail_result_id", "result_id"),
     )
+
+
+class CallLogRecord(Base):
+    """通话记录入库表 — 外部系统回调数据"""
+    __tablename__ = "call_log_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    phone = Column(String(32), nullable=True, comment="手机号")
+    call_link = Column(Text, nullable=True, comment="通话链接")
+    complaint_content = Column(Text, nullable=True, comment="投诉内容")
+    request_time = Column(DateTime, default=lambda: _naive_now(), comment="接口请求时间")
+    synced_to_dingtalk = Column(Boolean, default=False, comment="是否已同步到钉钉")
+    dingtalk_sync_error = Column(Text, nullable=True, comment="钉钉同步失败原因")
+    raw_body = Column(JSONB, nullable=True, comment="原始请求体（备用）")
+    created_at = Column(DateTime, default=lambda: _naive_now(), comment="创建时间")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "phone": self.phone,
+            "call_link": self.call_link,
+            "complaint_content": self.complaint_content,
+            "request_time": self.request_time.strftime("%Y-%m-%d %H:%M:%S") if self.request_time else None,
+            "synced_to_dingtalk": self.synced_to_dingtalk,
+            "dingtalk_sync_error": self.dingtalk_sync_error,
+            "raw_body": self.raw_body,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
+        }
 
 
 class QualityReviewResult(Base):

@@ -10,6 +10,7 @@ if sys.platform == 'win32':
     os.environ['PGCLIENTENCODING'] = 'UTF8'
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
@@ -29,6 +30,9 @@ sync_engine = create_engine(
     max_overflow=10,
     connect_args={'client_encoding': 'utf8'}
 )
+
+# 同步 Session 工厂（Celery Worker 使用）
+SessionLocal = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
 class Base(DeclarativeBase):
     pass

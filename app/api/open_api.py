@@ -11,7 +11,10 @@ from fastapi import APIRouter, HTTPException, Request, Security
 from pydantic import BaseModel
 
 from config import settings
+from app.models.database import async_session
+from app.models.result import CallLogRecord
 from app.services.system_log_service import log_service
+from app.tasks.dingtalk_sync import sync_call_log_to_dingtalk
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +54,12 @@ def _get_client_ip(request: Request) -> str:
 
 # ── 请求 / 响应模型 ──────────────────────────────
 
-class OpenApiRequest(BaseModel):
-    """开放接口入参 — 调用方传入任意 JSON 内容"""
-    data: Any  # 任意 JSON 结构
-
+# class OpenApiRequest(BaseModel):
+#     """开放接口入参 — 调用方传入任意 JSON 内容"""
+#     data: Any  # 任意 JSON 结构
+#     model_config = {
+#         "extra": "allow"
+#     }
 
 class OpenApiResponse(BaseModel):
     code: int = 0
@@ -66,15 +71,15 @@ class OpenApiResponse(BaseModel):
 
 @router.post("/callLog", response_model=OpenApiResponse)
 async def echo(
-    req: OpenApiRequest,
+    # req: OpenApiRequest,
     request: Request,
     # _api_key: str = Security(_verify_api_key),
 ):
-    """回显接口 — 将传入的 data 原样返回，用于联调验证"""
+    """回显接口 — 将传入的 data 原样返回，用于联调验证。同时入库并同步钉钉表格"""
     start_time = time.time()
     ip_address = _get_client_ip(request)
     user_agent = request.headers.get("User-Agent", "")
-    logger.info(f"[OpenAPI] callLog 被调用, ip={ip_address}, data_type={type(req.data).__name__}")
+    logger.info(f"[OpenAPI] callLog 被调用, ip={ip_address}")
 
     try:
         # 读取客户端完整 JSON 请求体（整段报文，包含外层 data 结构）
@@ -84,6 +89,61 @@ async def echo(
     except Exception:
         # 兼容非标准JSON、空请求体等异常场景
         full_request_body = ""
+        full_raw_body = {}
+
+    # === 解析数据 ===
+    phone = None
+    call_link = None
+    complaint_content = None
+
+    try:
+        body = full_raw_body
+        # 提取手机号
+        if "text" in body and isinstance(body["text"], dict):
+            phone = body["text"].get("手机号")
+            call_link = body["text"].get("通话链接")
+
+        # 提取投诉内容（通过 custom_fields_map 反查）
+        if "custom_fields_map" in body and "data" in body:
+            custom_fields_map = body.get("custom_fields_map", {})
+            data_section = body.get("data", {})
+            # 遍历 custom_fields_map 找到值为 "投诉内容" 的 UUID
+            for uuid_key, field_name in custom_fields_map.items():
+                if field_name == "投诉内容":
+                    complaint_content = data_section.get(uuid_key)
+                    break
+
+    except Exception as e:
+        logger.warning(f"[OpenAPI] callLog 数据解析失败: {e}")
+
+    # === 入库 ===
+    record = None
+    try:
+        async with async_session() as session:
+            record = CallLogRecord(
+                phone=phone,
+                call_link=call_link,
+                complaint_content=complaint_content,
+                synced_to_dingtalk=False,
+                raw_body=full_raw_body if isinstance(full_raw_body, dict) else None,
+            )
+            session.add(record)
+            await session.commit()
+            await session.refresh(record)
+            logger.info(f"[OpenAPI] callLog 入库成功: id={record.id}, phone={phone}")
+    except Exception as e:
+        logger.error(f"[OpenAPI] callLog 入库失败: {e}")
+        # 入库失败不影响接口响应，继续执行
+
+    # === 派发钉钉同步异步任务 ===
+    dingtalk_dispatched = False
+    if record:
+        try:
+            sync_call_log_to_dingtalk.delay(record.id)
+            dingtalk_dispatched = True
+            logger.info(f"[OpenAPI] callLog 钉钉同步任务已派发: record_id={record.id}")
+        except Exception as e:
+            logger.error(f"[OpenAPI] callLog 钉钉任务派发失败: {e}")
 
     try:
         response = OpenApiResponse(data={})
@@ -103,7 +163,12 @@ async def echo(
             action="open_api_call",
             resource_type="open_api",
             resource_id="callLog",
-            extra_data={"data_type": type(req.data).__name__},
+            extra_data={
+                "phone": phone,
+                "call_link": call_link,
+                "complaint_content": complaint_content,
+                "dingtalk_task_dispatched": dingtalk_dispatched,
+            },
         )
 
         return response
