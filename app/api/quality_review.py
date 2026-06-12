@@ -2,6 +2,7 @@
 """质检二次审查 API"""
 import asyncio
 import uuid
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select, func, or_, and_
@@ -10,10 +11,11 @@ from app.models.result import QualityCheckResult, QualityReviewResult, QualityCh
 from app.services.dependencies import require_permission
 from app.agents.quality_review import quality_review_agent
 from app.services.hujing_api import get_chat_records_for_quality_check
+from app.services.communication_api import get_chat_records_for_quality_check as get_comm_chat_records
 from app.services.cache import get_redis
 from app.tasks.quality_review import batch_quality_review_task
 from app.services.quality_review_query import pending_review_conditions
-from config import now_shanghai, to_naive_shanghai
+from config import now_shanghai, to_naive_shanghai, settings
 
 router = APIRouter()
 
@@ -257,14 +259,42 @@ async def instant_quality_review(
 
         key_evidence = detail.key_evidence if detail else []
 
-        # 4. 获取聊天记录（以当前时间为截止点，审查需基于最新聊天记录）
+        # 4. 获取聊天记录（根据数据源使用不同 API）
         now_str = to_naive_shanghai(now_shanghai()).strftime("%Y-%m-%d %H:%M:%S")
+        is_comm = quality_result.datasource == "communication"
 
-        chat_records = get_chat_records_for_quality_check(
-            user_id=quality_result.user_id,
-            friend_id=quality_result.friend_id,
-            end_time=now_str,
-        )
+        if is_comm:
+            # 云客数据源：使用 customer_wechat_no，需要获取任务时间范围
+            task_start_time = None
+            task_end_time = None
+            if quality_result.task_id:
+                task_stmt = select(QualityCheckTask).where(QualityCheckTask.id == quality_result.task_id)
+                task_result = await session.execute(task_stmt)
+                task = task_result.scalar_one_or_none()
+                if task:
+                    task_start_time = task.start_time
+                    task_end_time = task.end_time
+
+            end_time_str = task_end_time or now_str
+            start_time_str = task_start_time
+            if not start_time_str:
+                # 兜底：往前推配置天数
+                end_dt = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M:%S")
+                start_time_str = (end_dt - timedelta(days=settings.QUALITY_CHECK_CHAT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+
+            chat_records = get_comm_chat_records(
+                sales_user_id=quality_result.user_id,
+                customer_wechat_no=quality_result.customer_wechat_no or "",
+                end_time_str=end_time_str,
+                start_time_str=start_time_str,
+            )
+        else:
+            # 虎鲸数据源：使用 friend_id
+            chat_records = get_chat_records_for_quality_check(
+                user_id=quality_result.user_id,
+                friend_id=quality_result.friend_id,
+                end_time=now_str,
+            )
 
         # 5. 同步调用二次审查Agent（放入线程池，避免阻塞事件循环）
         loop = asyncio.get_event_loop()

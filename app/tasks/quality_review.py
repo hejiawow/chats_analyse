@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """质检二次审查批量任务"""
 import uuid
+from datetime import datetime, timedelta
 
 from celery import shared_task
 from sqlalchemy import select, update, or_, and_
@@ -10,8 +11,9 @@ from app.models.database import sync_engine
 from app.models.result import QualityCheckResult, QualityReviewResult, QualityCheckDetail, QualityCheckTask
 from app.agents.quality_review import quality_review_agent
 from app.services.hujing_api import get_chat_records_for_quality_check
+from app.services.communication_api import get_chat_records_for_quality_check as get_comm_chat_records
 from app.services.quality_review_query import pending_review_conditions, query_pending_review_ids
-from config import now_shanghai, to_naive_shanghai
+from config import now_shanghai, to_naive_shanghai, settings
 
 # Task层最大重试次数，超过后标记为已审查不再重试
 MAX_TASK_RETRIES = 10
@@ -128,14 +130,48 @@ def _process_single_review(session: Session, result_id: int, batch_id: str, idx:
           f"关键证据={len(key_evidence)}条, raw_response={'有' if has_raw_response else '无'}, "
           f"user={quality_result.user_id}, friend={quality_result.friend_id}")
 
-    # 获取聊天记录（以当前时间为截止点，审查需基于最新聊天记录）
+    # 获取聊天记录（根据数据源使用不同 API）
     now_str = to_naive_shanghai(now_shanghai()).strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[batch_review] [{idx}/{total}] result_id={result_id} 获取聊天记录 (end_time={now_str})...")
-    chat_records = get_chat_records_for_quality_check(
-        user_id=quality_result.user_id,
-        friend_id=quality_result.friend_id,
-        end_time=now_str,
-    )
+    is_comm = quality_result.datasource == "communication"
+    print(f"[batch_review] [{idx}/{total}] result_id={result_id} 数据源={quality_result.datasource}, "
+          f"是云客={is_comm}")
+
+    if is_comm:
+        # 云客数据源：使用 customer_wechat_no，需要获取任务时间范围
+        task_start_time = None
+        task_end_time = None
+        if quality_result.task_id:
+            task = session.execute(
+                select(QualityCheckTask).where(QualityCheckTask.id == quality_result.task_id)
+            ).scalar_one_or_none()
+            if task:
+                task_start_time = task.start_time
+                task_end_time = task.end_time
+
+        end_time_str = task_end_time or now_str
+        start_time_str = task_start_time
+        if not start_time_str:
+            # 兜底：往前推配置天数
+            end_dt = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M:%S")
+            start_time_str = (end_dt - timedelta(days=settings.QUALITY_CHECK_CHAT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+
+        print(f"[batch_review] [{idx}/{total}] result_id={result_id} 获取云客聊天记录 "
+              f"(salesUserId={quality_result.user_id}, customerWechatNo={quality_result.customer_wechat_no}, "
+              f"时间={start_time_str} ~ {end_time_str})...")
+        chat_records = get_comm_chat_records(
+            sales_user_id=quality_result.user_id,
+            customer_wechat_no=quality_result.customer_wechat_no or "",
+            end_time_str=end_time_str,
+            start_time_str=start_time_str,
+        )
+    else:
+        # 虎鲸数据源：使用 friend_id
+        print(f"[batch_review] [{idx}/{total}] result_id={result_id} 获取虎鲸聊天记录 (end_time={now_str})...")
+        chat_records = get_chat_records_for_quality_check(
+            user_id=quality_result.user_id,
+            friend_id=quality_result.friend_id,
+            end_time=now_str,
+        )
     print(f"[batch_review] [{idx}/{total}] result_id={result_id} 获取到 {len(chat_records)} 条聊天记录")
 
     # 调用二次审查Agent
