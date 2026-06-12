@@ -11,6 +11,13 @@
       <div class="qc-batch-form">
         <div class="qc-form-row">
           <div class="qc-form-group">
+            <div class="qc-form-label">数据源</div>
+            <a-radio-group v-model:value="batchForm.datasource" button-style="solid">
+              <a-radio-button value="hujing">虎鲸数据</a-radio-button>
+              <a-radio-button value="communication">云客数据</a-radio-button>
+            </a-radio-group>
+          </div>
+          <div class="qc-form-group" v-if="batchForm.datasource === 'hujing'">
             <div class="qc-form-label">质检方式</div>
             <a-radio-group v-model:value="batchForm.checkMode" button-style="solid">
               <a-radio-button value="by_pairs">按聊天对分析</a-radio-button>
@@ -37,7 +44,10 @@
           </div>
         </div>
         <div class="qc-batch-note">
-          <template v-if="batchForm.checkMode === 'by_pairs'">
+          <template v-if="batchForm.datasource === 'communication'">
+            批量质检将从云客接口获取销售-客户对话数据，进行关键词检测和AI深度分析。
+          </template>
+          <template v-else-if="batchForm.checkMode === 'by_pairs'">
             批量质检将分析指定时间范围内有聊天记录的销售-好友对，仅记录检测到风险关键词的结果。
           </template>
           <template v-else>
@@ -109,7 +119,7 @@
       </div>
     </div>
 
-    
+
     <!-- Detail modal -->
     <a-modal v-model:open="detailVisible" title="质检详情" width="700px" okText="确定" cancelText="取消">
       <a-descriptions v-if="detailData" :column="1" bordered size="small">
@@ -210,7 +220,7 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { SafetyOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
-import { getQualityCheckList, getQualityCheckDetail, triggerBatchQualityCheck, getBatchProgress, getBatchErrors, cancelBatchQualityCheck, triggerBatchQualityCheckByMessages, getQualityCheckChatRecords, getLogs } from '@/api/qualitycheck'
+import { getQualityCheckList, getQualityCheckDetail, triggerBatchQualityCheck, getBatchProgress, getBatchErrors, cancelBatchQualityCheck, triggerBatchQualityCheckByMessages, getQualityCheckChatRecords, getLogs, triggerBatchQualityCheckComm, getCommBatchProgress, cancelCommBatchQualityCheck } from '@/api/qualitycheck'
 
 const submitting = ref(false)
 const errorMsg = ref('')
@@ -218,6 +228,7 @@ const cancelling = ref(false)
 
 // Batch mode
 const batchForm = reactive({
+  datasource: 'hujing',  // 'hujing' 虎鲸数据，'communication' 云客数据
   checkMode: 'by_pairs', // 'by_pairs' 按聊天对分析，'by_messages' 按聊天记录分析
   timeRange: null,
   user_id: '',
@@ -226,6 +237,7 @@ const batchForm = reactive({
 const batchProgress = reactive({ completed: 0, total: 0, status: '', risk_detected: 0, no_chat: 0, failed: 0, error_message: '' })
 const batchTaskId = ref('')
 const batchLogs = ref([])
+const activeDatasource = ref('hujing')  // 当前运行中的数据源
 let batchPollInterval = null
 let consecutivePollErrors = 0
 const MAX_POLL_ERRORS = 5
@@ -348,11 +360,12 @@ function formatChatTime(time) {
 
 async function startBatchPolling(taskId) {
   consecutivePollErrors = 0
+  const progressFunc = activeDatasource.value === 'communication' ? getCommBatchProgress : getBatchProgress
   batchPollInterval = setInterval(async () => {
     try {
       // 并行获取进度和日志（互不干扰）
       const [progressRes, logsRes] = await Promise.allSettled([
-        getBatchProgress(taskId),
+        progressFunc(taskId),
         getLogs(taskId)
       ])
       consecutivePollErrors = 0
@@ -452,24 +465,37 @@ async function handleBatchAnalyze() {
   }
 
   try {
-    // 根据选择的质检方式调用不同的 API
-    const apiFunc = batchForm.checkMode === 'by_messages'
-      ? triggerBatchQualityCheckByMessages
-      : triggerBatchQualityCheck
-
-    const res = await apiFunc({
-      start_time: startTime,
-      end_time: endTime,
-      user_id: batchForm.user_id || null,
-      limit: batchForm.limit,
-    })
+    let res, successMsg
+    if (batchForm.datasource === 'communication') {
+      // 云客数据源
+      activeDatasource.value = 'communication'
+      res = await triggerBatchQualityCheckComm({
+        start_time: startTime,
+        end_time: endTime,
+        user_id: batchForm.user_id || null,
+        limit: batchForm.limit,
+      })
+      successMsg = '云客批量质检已启动'
+    } else {
+      // 虎鲸数据源
+      activeDatasource.value = 'hujing'
+      const apiFunc = batchForm.checkMode === 'by_messages'
+        ? triggerBatchQualityCheckByMessages
+        : triggerBatchQualityCheck
+      res = await apiFunc({
+        start_time: startTime,
+        end_time: endTime,
+        user_id: batchForm.user_id || null,
+        limit: batchForm.limit,
+      })
+      successMsg = batchForm.checkMode === 'by_messages'
+        ? '新批量质检已启动（基于聊天记录关键词匹配）'
+        : '批量质检已启动'
+    }
 
     batchTaskId.value = res.task_id
     batchProgress.status = 'running'
 
-    const successMsg = batchForm.checkMode === 'by_messages'
-      ? '新批量质检已启动（基于聊天记录关键词匹配）'
-      : '批量质检已启动'
     message.success(successMsg)
     startBatchPolling(res.task_id)
 

@@ -33,6 +33,11 @@ celery_app.conf.update(
             "task": "auto_quality_review_consumer",
             "schedule": crontab(minute="*/5"),  # 每5分钟触发一次，单次执行（查→处理→退出）
         },
+        # 云客数据源定时质检（待 API 就绪后启用）
+        # "batch-quality-communication": {
+        #     "task": "app.tasks.batch_quality_comm.run_batch_quality_comm",
+        #     "schedule": crontab(minute=30, hour="*/2"),  # 每2小时
+        # },
     },
 )
 

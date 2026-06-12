@@ -253,6 +253,9 @@ class QualityCheckTask(Base):
     filtered_count = Column(Integer, default=0, comment="被协议退费过滤条数")
     error_message = Column(Text, nullable=True, comment="错误信息（API失败等）")
 
+    # === 数据源标识 ===
+    datasource = Column(String(50), nullable=True, default="hujing", comment="数据来源: hujing / communication")
+
     # === 触发信息 ===
     triggered_by = Column(String(64), nullable=True, comment="触发人（CLI/API/cron）")
 
@@ -276,6 +279,7 @@ class QualityCheckTask(Base):
             "cancelled_count": self.cancelled_count,
             "filtered_count": self.filtered_count,
             "error_message": self.error_message,
+            "datasource": self.datasource,
             "triggered_by": self.triggered_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
@@ -301,7 +305,7 @@ class QualityCheckResult(Base):
     user_id = Column(String(64), nullable=False, comment="销售ID")
     user_name = Column(String(64), nullable=True, comment="销售姓名")
     user_wx_id = Column(String(64), nullable=True, comment="销售微信号")
-    friend_id = Column(BigInteger, nullable=False, comment="好友ID")
+    friend_id = Column(BigInteger, nullable=True, comment="好友ID（虎鲸数据源有值，沟通记录数据源可为空）")
     friend_name = Column(String(128), nullable=True, comment="好友姓名")
     friend_wx_id = Column(String(64), nullable=True, comment="好友微信号")
     friend_nick = Column(String(128), nullable=True, comment="好友昵称")
@@ -329,6 +333,10 @@ class QualityCheckResult(Base):
     confidence = Column(Float, nullable=True, comment="AI置信度：0到1")
     process_status = Column(String(32), default="pending", comment="处理状态：pending/processing/resolved/false_positive/escalated")
     has_secondary_review = Column(Boolean, default=False, comment="是否已进行二次审查")
+
+    # === 沟通记录数据源字段 ===
+    customer_wechat_no = Column(String(100), nullable=True, comment="客户微信号/企微标识（沟通记录数据源）")
+    datasource = Column(String(50), nullable=True, default="hujing", comment="数据来源: hujing / communication")
 
     # === 状态 ===
     status = Column(String(16), default="success", comment="success/failed/no_chat/no_keyword")
@@ -372,6 +380,8 @@ class QualityCheckResult(Base):
             "needs_manual_review": self.needs_manual_review,
             "confidence": self.confidence,
             "process_status": self.process_status,
+            "customer_wechat_no": self.customer_wechat_no,
+            "datasource": self.datasource,
             "has_secondary_review": self.has_secondary_review,
             "status": self.status,
             "error_msg": self.error_msg,

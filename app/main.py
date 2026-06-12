@@ -29,6 +29,7 @@ from app.services.hujing_api import (
     find_sales_by_department_and_name,
 )
 from app.tasks.batch_quality import run_batch_quality_check, get_batch_progress, cancel_batch_task, run_batch_quality_check_by_messages
+from app.tasks.batch_quality_comm import run_batch_quality_comm, get_comm_batch_progress, cancel_comm_batch_task
 from app.services.datasource.manager import DataSourceManager
 from app.services.dependencies import require_permission, require_auth, get_current_user
 from app.middleware.logging_middleware import AccessLogMiddleware
@@ -509,6 +510,75 @@ async def cancel_batch_quality_check(
         username=current_user["username"],
         task_id=task_id,
         task_type="batch_quality_check",
+        ip_address=ip_address,
+    )
+
+    return {"task_id": task_id, "status": "cancelling", "message": "任务取消请求已提交"}
+
+
+# === 云客数据源批量质检 ===
+
+@app.post("/api/trigger/batch-quality-check-comm")
+async def trigger_batch_quality_check_comm(
+    req: BatchQualityCheckRequest,
+    request: Request,
+    current_user: dict = Depends(require_permission("write:quality_check")),
+):
+    """云客数据源批量质检触发接口"""
+    task_id = str(uuid.uuid4())
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
+
+    now = datetime.now()
+    yesterday = now - timedelta(hours=24)
+    start_time = req.start_time or yesterday.strftime("%Y-%m-%d %H:%M:%S")
+    end_time = req.end_time or now.strftime("%Y-%m-%d %H:%M:%S")
+
+    run_batch_quality_comm.delay(
+        batch_task_id=task_id,
+        start_time=start_time,
+        end_time=end_time,
+        user_id_filter=req.user_id,
+        limit=req.limit,
+    )
+
+    await audit_service.log_batch_quality_check(
+        user_id=current_user["user_id"],
+        username=current_user["username"],
+        task_id=task_id,
+        time_range={"start": start_time, "end": end_time},
+        limit=req.limit,
+        ip_address=ip_address,
+    )
+
+    return {
+        "task_id": task_id,
+        "time_range": {"start": start_time, "end": end_time},
+        "message": f"云客批量质检已启动，时间范围：{start_time} 至 {end_time}",
+    }
+
+
+@app.get("/api/batch-quality-check-comm/{task_id}/progress")
+async def get_batch_quality_check_comm_progress(task_id: str, current_user: dict = Depends(require_auth)):
+    """获取云客批量质检进度"""
+    progress = get_comm_batch_progress(task_id)
+    return {"task_id": task_id, **progress}
+
+
+@app.post("/api/batch-quality-check-comm/{task_id}/cancel")
+async def cancel_batch_quality_check_comm(
+    task_id: str,
+    request: Request,
+    current_user: dict = Depends(require_permission("write:quality_check")),
+):
+    """取消云客批量质检任务"""
+    ip_address = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown")
+    cancel_comm_batch_task(task_id)
+
+    await audit_service.log_cancel_task(
+        user_id=current_user["user_id"],
+        username=current_user["username"],
+        task_id=task_id,
+        task_type="batch_quality_check_comm",
         ip_address=ip_address,
     )
 

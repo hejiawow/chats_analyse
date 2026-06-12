@@ -172,6 +172,12 @@
             <a-select-option :value="false">不需要</a-select-option>
           </a-select>
         </a-form-item>
+        <a-form-item label="数据源">
+          <a-select v-model:value="filters.datasource" placeholder="全部" style="width: 130px" allowClear>
+            <a-select-option value="hujing">虎鲸数据</a-select-option>
+            <a-select-option value="communication">云客</a-select-option>
+          </a-select>
+        </a-form-item>
         <a-form-item label="处理状态">
           <a-select v-model:value="filters.process_status" placeholder="全部" style="width: 130px" allowClear>
             <a-select-option value="pending">待处理</a-select-option>
@@ -249,10 +255,15 @@
             <div style="color: #999; font-size: 12px">{{ record.user_id }}</div>
           </div>
         </template>
+        <template v-if="column.key === 'datasource'">
+          <a-tag :color="record.datasource === 'communication' ? 'cyan' : 'blue'">
+            {{ record.datasource === 'communication' ? '云客' : '虎鲸' }}
+          </a-tag>
+        </template>
         <template v-if="column.key === 'friend_name'">
           <div>
             <div>{{ record.friend_name || '-' }}</div>
-            <div style="color: #999; font-size: 12px">{{ record.friend_id }}</div>
+            <div style="color: #999; font-size: 12px">{{ record.friend_id || record.customer_wechat_no || '' }}</div>
           </div>
         </template>
         <template v-if="column.key === 'risk_level'">
@@ -377,7 +388,13 @@
           <a-descriptions :column="1" bordered size="small" :label-style="{ width: '120px', minWidth: '120px' }">
             <a-descriptions-item label="销售ID">{{ detailData.user_id }}</a-descriptions-item>
             <a-descriptions-item label="销售姓名">{{ detailData.user_name || '-' }}</a-descriptions-item>
-            <a-descriptions-item label="好友ID">{{ detailData.friend_id }}</a-descriptions-item>
+            <a-descriptions-item label="好友ID">{{ detailData.friend_id || '-' }}</a-descriptions-item>
+            <a-descriptions-item v-if="detailData.datasource === 'communication' && detailData.customer_wechat_no" label="客户微信号">{{ detailData.customer_wechat_no }}</a-descriptions-item>
+            <a-descriptions-item label="数据来源">
+              <a-tag :color="detailData.datasource === 'communication' ? 'cyan' : 'blue'">
+                {{ detailData.datasource === 'communication' ? '云客' : '虎鲸' }}
+              </a-tag>
+            </a-descriptions-item>
             <a-descriptions-item label="好友姓名">{{ detailData.friend_name || '-' }}</a-descriptions-item>
             <a-descriptions-item label="好友备注">{{ detailData.chat_title || '-' }}</a-descriptions-item>
             <a-descriptions-item label="好友别名">{{ detailData.alias || '-' }}</a-descriptions-item>
@@ -484,6 +501,9 @@
     <a-modal style="top: 20px" v-model:open="chatRecordsVisible" title="全部聊天记录" width="900px" :footer="null" :closable="true">
       <div v-if="chatRecordsLoading" style="text-align: center; padding: 40px">
         <a-spin />
+      </div>
+      <div v-else-if="chatRecordsError" style="text-align: center; padding: 40px">
+        <a-alert type="error" :message="chatRecordsError" show-icon />
       </div>
       <div v-else-if="chatRecordsData.length === 0" style="text-align: center; padding: 40px; color: #999">
         暂无聊天记录
@@ -610,6 +630,7 @@ const filters = reactive({
   action_type: undefined,
   needs_manual_review: undefined,
   process_status: undefined,
+  datasource: undefined,
   timeRange: null
 })
 
@@ -651,6 +672,7 @@ const allColumns = [
   { title: '动作类型', key: 'action_type', minWidth: 110, ellipsis: true },
   { title: '处理状态', key: 'process_status', minWidth: 100 },
   { title: '检测关键词', key: 'detected_keywords', minWidth: 150, ellipsis: true },
+  { title: '数据源', dataIndex: 'datasource', key: 'datasource', minWidth: 90 },
   { title: '风险类别', dataIndex: 'risk_category', key: 'risk_category', minWidth: 100 },
   { title: '二次审查', dataIndex: 'has_secondary_review', key: 'has_secondary_review', width: 100 },
   { title: '备注', dataIndex: 'remark', key: 'remark', width: 150, ellipsis: true },
@@ -742,6 +764,7 @@ const chatRecordsLoading = ref(false)
 const chatRecordsData = ref([])
 const chatRecordsTotal = ref(0)
 const chatRecordsTimeRange = ref(null)
+const chatRecordsError = ref('')
 
 // 修改记录弹窗
 const modificationLogsVisible = ref(false)
@@ -910,6 +933,7 @@ async function loadStats() {
     if (filters.action_type) params.action_type = filters.action_type
     if (filters.needs_manual_review !== undefined) params.needs_manual_review = filters.needs_manual_review
     if (filters.process_status) params.process_status = filters.process_status
+    if (filters.datasource) params.datasource = filters.datasource
     if (filters.timeRange && filters.timeRange.length === 2) {
       params.start_time = filters.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
       params.end_time = filters.timeRange[1].format('YYYY-MM-DD HH:mm:ss')
@@ -1031,6 +1055,7 @@ async function loadData() {
     if (filters.action_type) params.action_type = filters.action_type
     if (filters.needs_manual_review !== undefined) params.needs_manual_review = filters.needs_manual_review
     if (filters.process_status) params.process_status = filters.process_status
+    if (filters.datasource) params.datasource = filters.datasource
     if (filters.timeRange && filters.timeRange.length === 2) {
       params.start_time = filters.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
       params.end_time = filters.timeRange[1].format('YYYY-MM-DD HH:mm:ss')
@@ -1069,6 +1094,7 @@ function handleReset() {
   filters.action_type = undefined
   filters.needs_manual_review = undefined
   filters.process_status = undefined
+  filters.datasource = undefined
   filters.timeRange = null
   sortState.field = null
   sortState.order = null
@@ -1188,15 +1214,20 @@ async function showChatRecords() {
   chatRecordsLoading.value = true
   chatRecordsData.value = []
   chatRecordsTimeRange.value = null
+  chatRecordsError.value = ''
   try {
     const res = await getQualityCheckChatRecords(detailData.value.id)
     chatRecordsData.value = res.data || []
     chatRecordsTotal.value = res.total || 0
     chatRecordsTimeRange.value = res.time_range || null
+    if (res.error) {
+      chatRecordsError.value = res.error
+    }
   } catch {
     chatRecordsData.value = []
     chatRecordsTotal.value = 0
     chatRecordsTimeRange.value = null
+    chatRecordsError.value = '请求失败，请检查网络或重试'
   } finally {
     chatRecordsLoading.value = false
   }
@@ -1279,6 +1310,7 @@ async function handleExport() {
     if (filters.action_type) params.action_type = filters.action_type
     if (filters.needs_manual_review !== undefined) params.needs_manual_review = filters.needs_manual_review
     if (filters.process_status) params.process_status = filters.process_status
+    if (filters.datasource) params.datasource = filters.datasource
     if (filters.timeRange && filters.timeRange.length === 2) {
       params.start_time = filters.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
       params.end_time = filters.timeRange[1].format('YYYY-MM-DD HH:mm:ss')

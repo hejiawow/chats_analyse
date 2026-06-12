@@ -99,3 +99,17 @@ export const updateQualityCheckResult = (id, data) =>
 // 获取质检结果修改记录（审计日志）
 export const getQualityCheckModificationLogs = (resultId) =>
   request.get(`/api/quality-check/${resultId}/modification-logs`)
+
+// === 云客数据源批量质检 ===
+
+// 触发云客批量质检
+export const triggerBatchQualityCheckComm = (data) =>
+  request.post('/api/trigger/batch-quality-check-comm', data)
+
+// 获取云客批量质检进度
+export const getCommBatchProgress = (taskId) =>
+  request.get(`/api/batch-quality-check-comm/${taskId}/progress`)
+
+// 取消云客批量质检
+export const cancelCommBatchQualityCheck = (taskId) =>
+  request.post(`/api/batch-quality-check-comm/${taskId}/cancel`)

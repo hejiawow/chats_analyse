@@ -2,6 +2,7 @@
 """质检检测结果查询 API"""
 import io
 import csv
+import logging
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 from fastapi import APIRouter, Query, Depends
@@ -15,10 +16,16 @@ from app.models.result import QualityCheckResult, QualityCheckModificationLog, Q
 from app.services.dependencies import require_permission, get_current_user
 from app.services.cache import cache_get, cache_set, cache_delete, cache_clear_pattern
 from app.services.hujing_api import get_chat_records, get_chat_records_for_quality_check
+from app.services.communication_api import (
+    get_chat_records_for_quality_check as get_comm_chat_records,
+    get_last_error as comm_get_last_error,
+)
 from config import now_shanghai, to_naive_shanghai, settings
 
 _STATS_CACHE_TTL = 300  # 统计缓存：5 分钟
 _STATS_CACHE_KEY = "quality_check:stats"
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -646,27 +653,74 @@ async def get_quality_check_chat_records(
         # 截止时间：当前最新时间
         now_str = to_naive_shanghai(now_shanghai()).strftime("%Y-%m-%d %H:%M:%S")
 
-        # 开始时间：优先使用质检任务原始的起始时间，兜底用当前时间往前推 QUALITY_CHECK_CHAT_DAYS 天
-        start_time_str = None
+        # 从质检任务获取时间范围
+        task_start_time = None
+        task_end_time = None
         if record.task_id:
             task_stmt = select(QualityCheckTask).where(QualityCheckTask.id == record.task_id)
             task_result = await session.execute(task_stmt)
             task = task_result.scalar_one_or_none()
-            if task and task.end_time:
-                end_dt = datetime.strptime(task.end_time, "%Y-%m-%d %H:%M:%S")
+            if task:
+                task_start_time = task.start_time
+                task_end_time = task.end_time
+
+        is_comm = record.datasource == "communication"
+
+        logger.info(
+            f"[质检聊天记录] result_id={result_id}, datasource={record.datasource}, "
+            f"user_id={record.user_id}, friend_id={record.friend_id}, "
+            f"customer_wechat_no={record.customer_wechat_no}, "
+            f"task_start={task_start_time}, task_end={task_end_time}"
+        )
+
+        if is_comm:
+            # 云客数据源：使用任务的时间范围，直接从 communication_api 获取
+            end_time_str = task_end_time or now_str
+            start_time_str = task_start_time
+            if not start_time_str:
+                # 兜底：往前推 QUALITY_CHECK_CHAT_DAYS 天
+                end_dt = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M:%S")
+                start_time_str = (end_dt - timedelta(days=settings.QUALITY_CHECK_CHAT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+
+            chat_records = get_comm_chat_records(
+                sales_user_id=record.user_id,
+                customer_wechat_no=record.customer_wechat_no or "",
+                end_time_str=end_time_str,
+                start_time_str=start_time_str,
+            )
+            # 检查 API 调用是否失败
+            comm_error = comm_get_last_error()
+            logger.info(
+                f"[质检聊天记录] 云客查询结果: {len(chat_records)} 条, "
+                f"error={comm_error}"
+            )
+            if comm_error and not chat_records:
+                return {
+                    "total": 0,
+                    "data": [],
+                    "error": f"云客接口调用失败: {comm_error}",
+                    "time_range": {
+                        "start": start_time_str,
+                        "end": end_time_str,
+                    },
+                }
+        else:
+            # 虎鲸数据源：保持原有逻辑
+            start_time_str = None
+            if task_end_time:
+                end_dt = datetime.strptime(task_end_time, "%Y-%m-%d %H:%M:%S")
                 start_dt = end_dt - timedelta(days=settings.QUALITY_CHECK_CHAT_DAYS)
                 start_time_str = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+            if not start_time_str:
+                end_dt = datetime.strptime(now_str, "%Y-%m-%d %H:%M:%S")
+                start_time_str = (end_dt - timedelta(days=settings.QUALITY_CHECK_CHAT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
 
-        if not start_time_str:
-            end_dt = datetime.strptime(now_str, "%Y-%m-%d %H:%M:%S")
-            start_time_str = (end_dt - timedelta(days=settings.QUALITY_CHECK_CHAT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
-
-        chat_records = get_chat_records(
-            user_id=record.user_id,
-            friend_id=int(record.friend_id),
-            start_time=start_time_str,
-            end_time=now_str,
-        )
+            chat_records = get_chat_records(
+                user_id=record.user_id,
+                friend_id=int(record.friend_id) if record.friend_id else 0,
+                start_time=start_time_str,
+                end_time=now_str,
+            )
 
         return {
             "total": len(chat_records),
