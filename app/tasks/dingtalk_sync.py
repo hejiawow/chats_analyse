@@ -66,7 +66,7 @@ def sync_call_log_to_dingtalk(self, record_id: int):
             record.phone or "",
             record.call_link or "",
             record.complaint_content or "",
-            record.request_time.isoformat() if record.request_time else "",
+            record.request_time.strftime("%Y-%m-%d %H:%M:%S") if record.request_time else "",
         ]
 
         # 获取 access_token

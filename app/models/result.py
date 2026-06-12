@@ -508,11 +508,11 @@ class CallLogRecord(Base):
             "phone": self.phone,
             "call_link": self.call_link,
             "complaint_content": self.complaint_content,
-            "request_time": self.request_time.isoformat() if self.request_time else None,
+            "request_time": self.request_time.strftime("%Y-%m-%d %H:%M:%S") if self.request_time else None,
             "synced_to_dingtalk": self.synced_to_dingtalk,
             "dingtalk_sync_error": self.dingtalk_sync_error,
             "raw_body": self.raw_body,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M:%S") if self.created_at else None,
         }
 
 
