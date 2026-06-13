@@ -357,13 +357,6 @@
                 <span class="guidance-label">处理时限</span>
                 <p>{{ detailData.follow_up_deadline || '-' }}</p>
               </div>
-              <div class="guidance-item full">
-                <div class="guidance-copy-row">
-                  <span class="guidance-label">建议话术</span>
-                  <a-button size="small" type="link" @click="copyReplySuggestion">复制</a-button>
-                </div>
-                <p>{{ detailData.guidance?.reply_suggestion || '-' }}</p>
-              </div>
               <div class="guidance-item">
                 <span class="guidance-label">培训建议</span>
                 <p>{{ detailData.guidance?.training_suggestion || '-' }}</p>
@@ -383,6 +376,8 @@
             <a-descriptions-item label="好友别名">{{ detailData.alias || '-' }}</a-descriptions-item>
             <a-descriptions-item label="绑定手机号">{{ detailData.phone || '-' }}</a-descriptions-item>
             <a-descriptions-item label="备注手机号">{{ detailData.remark_phone || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="报班手机号">{{ detailData.enrollment_phone || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="第二报班手机号">{{ detailData.enrollment_phone_2 || '-' }}</a-descriptions-item>
             <a-descriptions-item label="检测时间">{{ formatDateTime(detailData.check_time_start) }} ~ {{ formatDateTime(detailData.check_time_end) }}</a-descriptions-item>
             <a-descriptions-item label="聊天记录数">{{ detailData.chat_record_count }}</a-descriptions-item>
             <a-descriptions-item label="检测关键词">{{ detailData.detected_keywords || '无' }}</a-descriptions-item>
@@ -640,9 +635,8 @@ const allColumns = [
   { title: '好友', key: 'friend_name', minWidth: 130, ellipsis: true },
   { title: '时间', dataIndex: 'created_at', key: 'created_at', minWidth: 120, ellipsis: true, sorter: true },
   { title: '好友备注', dataIndex: 'chat_title', key: 'chat_title', width: 130 },
+  { title: '报班手机号', dataIndex: 'enrollment_phone', key: 'enrollment_phone', minWidth: 130, ellipsis: true },
   { title: '好友别名', dataIndex: 'alias', key: 'alias', minWidth: 120, ellipsis: true },
-  { title: '绑定手机号', dataIndex: 'phone', key: 'phone', minWidth: 130, ellipsis: true },
-  { title: '备注手机号', dataIndex: 'remark_phone', key: 'remark_phone', minWidth: 130, ellipsis: true },
   { title: '风险等级', dataIndex: 'risk_level', key: 'risk_level', minWidth: 100, sorter: true },
   { title: '触发方', dataIndex: 'trigger_party', key: 'trigger_party', width: 100 },
   { title: '问题摘要', key: 'issue_summary', width: 220 },
@@ -1075,20 +1069,6 @@ function handleReset() {
   pagination.current = 1
   loadData()
   loadStats()
-}
-
-async function copyReplySuggestion() {
-  const text = detailData.value?.guidance?.reply_suggestion || ''
-  if (!text) {
-    message.warning('暂无可复制话术')
-    return
-  }
-  try {
-    await navigator.clipboard.writeText(text)
-    message.success('话术已复制')
-  } catch {
-    message.error('复制失败')
-  }
 }
 
 // 分页 + 排序

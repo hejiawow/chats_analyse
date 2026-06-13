@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 from app.models.database import sync_engine
 from app.models.result import QualityCheckResult, QualityReviewResult, QualityCheckDetail, QualityCheckTask
 from app.agents.quality_review import quality_review_agent
-from app.services.hujing_api import get_chat_records_for_quality_check
+from app.services.hujing_api import get_chat_records, get_chat_records_for_quality_check
 from app.services.quality_review_query import pending_review_conditions, query_pending_review_ids
-from config import now_shanghai, to_naive_shanghai
+from config import now_shanghai, to_naive_shanghai, settings
 
 # Task层最大重试次数，超过后标记为已审查不再重试
 MAX_TASK_RETRIES = 10
@@ -128,14 +128,25 @@ def _process_single_review(session: Session, result_id: int, batch_id: str, idx:
           f"关键证据={len(key_evidence)}条, raw_response={'有' if has_raw_response else '无'}, "
           f"user={quality_result.user_id}, friend={quality_result.friend_id}")
 
-    # 获取聊天记录（以当前时间为截止点，审查需基于最新聊天记录）
+    # 获取聊天记录（复用首次质检起始时间，截止到当前时间）
     now_str = to_naive_shanghai(now_shanghai()).strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[batch_review] [{idx}/{total}] result_id={result_id} 获取聊天记录 (end_time={now_str})...")
-    chat_records = get_chat_records_for_quality_check(
-        user_id=quality_result.user_id,
-        friend_id=quality_result.friend_id,
-        end_time=now_str,
-    )
+    chat_start = quality_result.chat_start_time
+    if chat_start:
+        # 复用首次质检的起始时间，覆盖到现在，确保包含全部历史
+        print(f"[batch_review] [{idx}/{total}] result_id={result_id} 使用存储的 chat_start_time={chat_start}")
+        chat_records = get_chat_records(quality_result.user_id, quality_result.friend_id, chat_start, now_str)
+        # 截取最新 QUALITY_CHECK_MAX_CHAT_RECORDS 条
+        max_records = settings.QUALITY_CHECK_MAX_CHAT_RECORDS
+        if len(chat_records) > max_records:
+            chat_records = chat_records[-max_records:]
+    else:
+        # 兼容旧数据：回退到默认时间窗口
+        print(f"[batch_review] [{idx}/{total}] result_id={result_id} 无 chat_start_time，使用默认窗口")
+        chat_records = get_chat_records_for_quality_check(
+            user_id=quality_result.user_id,
+            friend_id=quality_result.friend_id,
+            end_time=now_str,
+        )
     print(f"[batch_review] [{idx}/{total}] result_id={result_id} 获取到 {len(chat_records)} 条聊天记录")
 
     # 调用二次审查Agent
@@ -173,6 +184,8 @@ def _process_single_review(session: Session, result_id: int, batch_id: str, idx:
             existing_failed.review_reason = review_result.get("review_reason")
             existing_failed.suggested_action = review_result.get("suggested_action")
             existing_failed.confidence = review_result.get("confidence")
+            existing_failed.initial_risk_level_corrected = review_result.get("initial_risk_level_corrected")
+            existing_failed.initial_deviation_type = review_result.get("initial_deviation_type")
             existing_failed.review_status = "completed"
             existing_failed.error_msg = None
             existing_failed.completed_at = to_naive_shanghai(now_shanghai())
@@ -189,6 +202,8 @@ def _process_single_review(session: Session, result_id: int, batch_id: str, idx:
                 review_reason=review_result.get("review_reason"),
                 suggested_action=review_result.get("suggested_action"),
                 confidence=review_result.get("confidence"),
+                initial_risk_level_corrected=review_result.get("initial_risk_level_corrected"),
+                initial_deviation_type=review_result.get("initial_deviation_type"),
                 review_status="completed",
                 review_mode="batch",
                 batch_id=batch_id,

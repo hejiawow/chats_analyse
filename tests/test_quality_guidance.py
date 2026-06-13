@@ -126,7 +126,6 @@ class QualityGuidanceModelTest(unittest.TestCase):
             "follow_up_deadline",
             "needs_manual_review",
             "guidance",
-            "reply_suggestion",
         ]
 
         missing = [term for term in required_terms if term not in prompt]

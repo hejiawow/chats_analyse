@@ -15,6 +15,7 @@ ALLOWED_SECONDARY_RISK_LEVELS = {"high", "medium", "low", "none", "unknown"}
 ALLOWED_SUGGESTED_ACTIONS = {"立即介入", "主管复核", "客服跟进", "销售安抚", "培训复盘", "误报观察", "无需处理"}
 ALLOWED_RISK_TYPES = {"退费", "投诉", "其他"}
 ALLOWED_PRIORITIES = {"P0", "P1", "P2", "P3"}
+ALLOWED_DEVIATION_TYPES = {"售前误判", "销售混淆", "售前流失误判", "系统提示误判", "角色错位", "时间定位偏差", "优先级偏差", "风险类型偏差", "无偏差"}
 
 
 def _coerce_confidence(value) -> float:
@@ -67,6 +68,24 @@ def _normalize_review_result(raw: dict | None) -> dict:
     # 新增字段：first_mention_time
     first_mention_time = str(raw.get("first_mention_time") or "").strip() or None
 
+    # 新增字段：initial_risk_level_corrected
+    initial_risk_level_corrected = raw.get("initial_risk_level_corrected")
+    if isinstance(initial_risk_level_corrected, bool):
+        pass
+    elif isinstance(initial_risk_level_corrected, str):
+        initial_risk_level_corrected = initial_risk_level_corrected.strip().lower() in {"true", "1", "yes", "是"}
+    else:
+        initial_risk_level_corrected = None
+
+    # 新增字段：initial_deviation_type
+    initial_deviation_type = raw.get("initial_deviation_type")
+    if isinstance(initial_deviation_type, str):
+        initial_deviation_type = initial_deviation_type.strip()
+        if initial_deviation_type not in ALLOWED_DEVIATION_TYPES:
+            initial_deviation_type = None
+    else:
+        initial_deviation_type = None
+
     return {
         "confirmed": confirmed,
         "risk_type": risk_type,
@@ -76,6 +95,8 @@ def _normalize_review_result(raw: dict | None) -> dict:
         "review_reason": review_reason[:500],
         "suggested_action": suggested_action,
         "confidence": confidence,
+        "initial_risk_level_corrected": initial_risk_level_corrected,
+        "initial_deviation_type": initial_deviation_type,
     }
 
 
@@ -101,6 +122,8 @@ def _parse_ai_response(raw: str) -> dict:
         "review_reason": "AI响应解析失败，请人工复核",
         "suggested_action": "主管复核",
         "confidence": 0.0,
+        "initial_risk_level_corrected": None,
+        "initial_deviation_type": "无偏差",
     })
 
 
@@ -224,6 +247,8 @@ def quality_review_agent(
         "review_reason": f"AI分析失败: {last_error}",
         "suggested_action": "主管复核",
         "confidence": 0.0,
+        "initial_risk_level_corrected": None,
+        "initial_deviation_type": "无偏差",
     })
     result["raw_response"] = None
     result["status"] = "failed"

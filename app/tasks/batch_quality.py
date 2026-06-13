@@ -15,6 +15,7 @@ from config import settings, now_shanghai
 from app.api.quality_check_query import invalidate_quality_check_stats_cache
 from app.services.cache import cache_clear_pattern
 from app.services.log_service import log as _log, LOGS_KEY_PREFIX
+from app.services.phone_extractor import extract_enrollment_phones
 
 
 logger = logging.getLogger(__name__)
@@ -274,7 +275,10 @@ def run_single_batch_check(self, batch_task_id: str, db_task_id: int, user_id: s
                     alias=friend_info.get("alias"),
                     phone=friend_info.get("phone"),
                     remark_phone=friend_info.get("remark_phone"),
+                    **extract_enrollment_phones(friend_info.get("remark_phone"), friend_info.get("chat_title")),
                     chat_record_count=result.get("chat_record_count", len(chat_records)),
+                    chat_start_time=actual_start_time,
+                    chat_end_time=end_time,
                     task_id=db_task_id,
                     created_at=now_shanghai(),
                     **_quality_result_kwargs(result),
@@ -507,7 +511,10 @@ def run_single_check_for_matched_pair(self, batch_task_id: str, db_task_id: int,
                     alias=alias,
                     phone=phone,
                     remark_phone=remark_phone,
+                    **extract_enrollment_phones(remark_phone, chat_title),
                     chat_record_count=result.get("chat_record_count", len(chat_records)),
+                    chat_start_time=actual_start_time,
+                    chat_end_time=end_time,
                     task_id=db_task_id,
                     created_at=now_shanghai(),
                     **_quality_result_kwargs(result),

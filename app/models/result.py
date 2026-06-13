@@ -315,8 +315,12 @@ class QualityCheckResult(Base):
     alias = Column(String(128), nullable=True, comment="好友别名")
     phone = Column(String(32), nullable=True, comment="绑定手机号")
     remark_phone = Column(String(32), nullable=True, comment="备注手机号")
+    enrollment_phone = Column(String(32), nullable=True, comment="报班手机号")
+    enrollment_phone_2 = Column(String(32), nullable=True, comment="第二报班手机号")
 
     chat_record_count = Column(Integer, nullable=True, comment="聊天记录条数")
+    chat_start_time = Column(String(32), nullable=True, comment="LLM分析聊天记录起始时间")
+    chat_end_time = Column(String(32), nullable=True, comment="LLM分析聊天记录结束时间")
 
     # === 关键词检测结果 ===
     keyword_detected = Column(String(16), default="no", comment="yes/no 是否检测到关键词")
@@ -364,7 +368,11 @@ class QualityCheckResult(Base):
             "alias": self.alias,
             "phone": self.phone,
             "remark_phone": self.remark_phone,
+            "enrollment_phone": self.enrollment_phone,
+            "enrollment_phone_2": self.enrollment_phone_2,
             "chat_record_count": self.chat_record_count,
+            "chat_start_time": self.chat_start_time,
+            "chat_end_time": self.chat_end_time,
             "keyword_detected": self.keyword_detected,
             "detected_keywords": self.detected_keywords,
             "risk_level": self.risk_level,
@@ -532,7 +540,9 @@ class QualityReviewResult(Base):
     review_reason = Column(Text, nullable=True, comment="二次判断理由")
     suggested_action = Column(String(128), nullable=True, comment="建议处理动作")
     confidence = Column(Float, nullable=True, comment="AI置信度：0到1")
-
+    initial_risk_level_corrected = Column(Boolean, nullable=True, comment="是否修正了初次风险等级")
+    initial_deviation_type = Column(String(64), nullable=True, comment="初次分析偏差类型")
+    
     # 状态字段
     review_status = Column(String(16), default="pending", comment="审查状态：pending/completed/failed")
 
@@ -558,6 +568,8 @@ class QualityReviewResult(Base):
             "review_reason": self.review_reason,
             "suggested_action": self.suggested_action,
             "confidence": self.confidence,
+            "initial_risk_level_corrected": self.initial_risk_level_corrected,
+            "initial_deviation_type": self.initial_deviation_type,
             "review_status": self.review_status,
             "review_mode": self.review_mode,
             "batch_id": self.batch_id,

@@ -14,6 +14,7 @@ from app.models.result import ReferralResult, CaseExtractionResult, SalesJourney
 from app.models.database import sync_engine
 from config import settings, now_shanghai
 from app.services.log_service import log as _log, get_task_logs, mark_task_done, is_task_done, clear_task_logs
+from app.services.phone_extractor import extract_enrollment_phones
 
 # 使用 Redis 存储日志和任务状态（跨进程共享）
 import redis
@@ -350,6 +351,13 @@ def run_analysis(self, task_id: str, user_id: str, friend_id: int,
                     _sales_list = get_all_sales()
                     _user_name = next((s.get("username") for s in _sales_list if s.get("user_id") == user_id), None)
 
+                    # 计算实际聊天记录起始时间（与 batch_quality.py 逻辑一致）
+                    _chat_start = start_time
+                    if not _chat_start and end_time:
+                        from datetime import datetime as _dt, timedelta as _td
+                        _end_dt = _dt.strptime(end_time, "%Y-%m-%d %H:%M:%S")
+                        _chat_start = (_end_dt - _td(days=settings.QUALITY_CHECK_CHAT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+
                     # 保存主表记录（不含大字段）
                     record = QualityCheckResult(
                         user_id=user_id,
@@ -363,7 +371,10 @@ def run_analysis(self, task_id: str, user_id: str, friend_id: int,
                         alias=_alias,
                         phone=_phone,
                         remark_phone=_remark_phone,
+                        **extract_enrollment_phones(_remark_phone, _chat_title),
                         chat_record_count=result.get("chat_record_count"),
+                        chat_start_time=_chat_start,
+                        chat_end_time=end_time,
                         keyword_detected=result.get("keyword_detected", "no"),
                         detected_keywords=result.get("detected_keywords"),
                         risk_level=result.get("risk_level"),

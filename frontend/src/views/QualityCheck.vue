@@ -120,6 +120,8 @@
         <a-descriptions-item label="好友别名">{{ detailData.alias || '-' }}</a-descriptions-item>
         <a-descriptions-item label="绑定手机号">{{ detailData.phone || '-' }}</a-descriptions-item>
         <a-descriptions-item label="备注手机号">{{ detailData.remark_phone || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="报班手机号">{{ detailData.enrollment_phone || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="第二报班手机号">{{ detailData.enrollment_phone_2 || '-' }}</a-descriptions-item>
         <a-descriptions-item label="检测时间">{{ detailData.check_time_start }} ~ {{ detailData.check_time_end }}</a-descriptions-item>
         <a-descriptions-item label="聊天记录数">{{ detailData.chat_record_count }}</a-descriptions-item>
         <a-descriptions-item label="关键词检测">
@@ -147,9 +149,6 @@
         </a-descriptions-item>
         <a-descriptions-item v-if="detailData.guidance && detailData.guidance.immediate_action" label="处理动作">
           <pre style="white-space: pre-wrap; margin: 0">{{ detailData.guidance.immediate_action }}</pre>
-        </a-descriptions-item>
-        <a-descriptions-item v-if="detailData.guidance && detailData.guidance.reply_suggestion" label="建议话术">
-          <pre style="white-space: pre-wrap; margin: 0">{{ detailData.guidance.reply_suggestion }}</pre>
         </a-descriptions-item>
       </a-descriptions>
     </a-modal>

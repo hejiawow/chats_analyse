@@ -255,9 +255,9 @@ def _parse_ai_response(raw: str) -> dict:
             "risk_reason": "AI响应无法解析，需人工查看聊天记录确认风险。",
             "customer_intent": "未知",
             "immediate_action": "请质检人员人工复核该聊天记录。",
-            "reply_suggestion": "",
             "training_suggestion": "",
             "escalation_reason": "",
+            "sales_violation": "未发现违规话术",
         },
         "key_evidence": [],
     })
@@ -329,9 +329,9 @@ def _ai_deep_analysis(chat_records: list, keyword_matches: list) -> dict:
             "risk_reason": f"AI分析失败: {last_error}",
             "customer_intent": "未知",
             "immediate_action": "请质检人员人工复核该聊天记录。",
-            "reply_suggestion": "",
             "training_suggestion": "",
             "escalation_reason": "",
+            "sales_violation": "未发现违规话术",
         },
         "key_evidence": [],
     })
@@ -417,9 +417,9 @@ def quality_check_agent(
                 "risk_reason": "本地关键词预检测未命中风险关键词。",
                 "customer_intent": "无明确风险诉求",
                 "immediate_action": "无需处理",
-                "reply_suggestion": "",
                 "training_suggestion": "",
                 "escalation_reason": "",
+                "sales_violation": "未发现违规话术",
             },
             "key_evidence": [],
         })
