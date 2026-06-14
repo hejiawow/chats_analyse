@@ -18,7 +18,7 @@
             <a-select-option value="P3">P3</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="二次风险等级">
+        <a-form-item label="风险等级">
           <a-select v-model:value="filters.secondary_risk_levels" mode="multiple" placeholder="全部" style="width: 260px" allowClear :maxTagCount="2">
             <a-select-option value="high">高风险</a-select-option>
             <a-select-option value="medium">中风险</a-select-option>
@@ -75,7 +75,7 @@
       :loading="loading"
       :pagination="pagination"
       row-key="id"
-      :scroll="{ x: 1600 }"
+      :scroll="{ x: 1280 }"
       size="small"
       @change="handleTableChange"
     >
@@ -83,26 +83,26 @@
         <template v-if="column.key === 'result_id'">
           <a-button type="link" size="small" @click="goToQualityResult(record.result_id)">{{ record.result_id }}</a-button>
         </template>
-        <template v-if="column.key === 'risk_category'">
-          <a-tag v-if="record.risk_category" color="blue">{{ record.risk_category }}</a-tag>
-          <span v-else>-</span>
+        <template v-if="column.key === 'user_name'">
+          <div class="table-small-text">{{ record.user_name || '-' }}</div>
+        </template>
+        <template v-if="column.key === 'friend_name'">
+          <div class="table-small-text">{{ record.friend_name || '-' }}</div>
+        </template>
+        <template v-if="column.key === 'enrollment_phone'">
+          <div class="table-small-text">{{ record.enrollment_phone || '-' }}</div>
+        </template>
+        <template v-if="column.key === 'chat_title'">
+          <div class="table-chat-title">{{ record.chat_title || '-' }}</div>
+        </template>
+        <template v-if="column.key === 'risk_level'">
+          <a-tag :color="getRiskColor(record.secondary_risk_level)">{{ getRiskText(record.secondary_risk_level) }}</a-tag>
         </template>
         <template v-if="column.key === 'risk_type'">
           <a-tag :color="getRiskTypeColor(record.risk_type)">{{ record.risk_type || '-' }}</a-tag>
         </template>
         <template v-if="column.key === 'priority'">
           <a-tag :color="getPriorityColor(record.priority)">{{ record.priority || '-' }}</a-tag>
-        </template>
-        <template v-if="column.key === 'confirmed'">
-          <template v-if="record.confirmed === null || record.confirmed === undefined">-</template>
-          <a-tag v-else :color="record.confirmed ? 'success' : 'default'">{{ record.confirmed ? '是' : '否' }}</a-tag>
-        </template>
-        <template v-if="column.key === 'risk_level_comparison'">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <a-tag :color="getRiskColor(record.original_risk_level)">{{ getRiskText(record.original_risk_level) }}</a-tag>
-            <span>→</span>
-            <a-tag :color="getRiskColor(record.secondary_risk_level)">{{ getRiskText(record.secondary_risk_level) }}</a-tag>
-          </div>
         </template>
         <template v-if="column.key === 'issue_summary'">
           <a-tooltip v-if="record.issue_summary" placement="topLeft" :overlayStyle="{ maxWidth: '520px' }">
@@ -142,6 +142,7 @@
             <a-descriptions-item label="好友别名">{{ currentDetail.quality_check_result?.alias || '-' }}</a-descriptions-item>
             <a-descriptions-item label="绑定手机号">{{ currentDetail.quality_check_result?.phone || '-' }}</a-descriptions-item>
             <a-descriptions-item label="备注手机号">{{ currentDetail.quality_check_result?.remark_phone || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="报班手机号">{{ currentDetail.quality_check_result?.enrollment_phone || '-' }}</a-descriptions-item>
             <a-descriptions-item label="风险等级">
               <a-tag :color="getRiskColor(currentDetail.quality_check_result?.modified_risk_level || currentDetail.quality_check_result?.risk_level)">
                 {{ getRiskText(currentDetail.quality_check_result?.modified_risk_level || currentDetail.quality_check_result?.risk_level) }}
@@ -427,18 +428,18 @@ const processEditForm = reactive({
 })
 
 const columns = [
-  { title: '质检ID', key: 'result_id', dataIndex: 'result_id', width: 80 },
-  { title: '销售姓名', dataIndex: 'user_name', key: 'user_name', width: 90 },
-  { title: '好友姓名', dataIndex: 'friend_name', key: 'friend_name', width: 100 },
-  { title: '是否属退费投诉', key: 'confirmed', width: 110 },
-  { title: '初次质检风险', key: 'risk_category', width: 110 },
-  { title: '审查时间', dataIndex: 'completed_at', key: 'completed_at', width: 120, sorter: true },
-  { title: '问题摘要', key: 'issue_summary', width: 220 },
-  { title: '二次判定风险', key: 'risk_type', width: 100 },
-  { title: '优先级', dataIndex: 'priority', key: 'priority', width: 70, sorter: true },
-  { title: '风险等级对比', key: 'risk_level_comparison', width: 170 },
-  { title: '处理状态', key: 'process_status', width: 90 },
-  { title: '操作', key: 'actions', width: 120, fixed: 'right' }
+  { title: '质检ID', key: 'result_id', dataIndex: 'result_id', width: 70 },
+  { title: '销售姓名', dataIndex: 'user_name', key: 'user_name', width: 72 },
+  { title: '好友昵称', dataIndex: 'friend_name', key: 'friend_name', width: 80 },
+  { title: '报班手机号', dataIndex: 'enrollment_phone', key: 'enrollment_phone', width: 100 },
+  { title: '好友备注', key: 'chat_title', width: 120 },
+  { title: '审查时间', dataIndex: 'completed_at', key: 'completed_at', width: 115, sorter: true },
+  { title: '问题摘要', key: 'issue_summary', width: 200 },
+  { title: '风险类型', key: 'risk_type', width: 85 },
+  { title: '优先级', dataIndex: 'priority', key: 'priority', width: 65, sorter: true },
+  { title: '风险等级', key: 'risk_level', width: 82 },
+  { title: '处理状态', key: 'process_status', width: 82 },
+  { title: '操作', key: 'actions', width: 110, fixed: 'right' }
 ]
 
 function getRiskColor(level) {
@@ -729,6 +730,7 @@ onMounted(() => { fetchData(); fetchTabCounts() })
   white-space: pre-wrap;
   margin: 0;
   word-break: break-word;
+  font-size: 12px;
 }
 
 .evidence-item {
@@ -746,6 +748,7 @@ onMounted(() => { fetchData(); fetchTabCounts() })
 .evidence-content {
   color: #333;
   line-height: 1.5;
+  font-size: 12px;
 }
 
 .review-col-footer {
@@ -762,6 +765,29 @@ onMounted(() => { fetchData(); fetchTabCounts() })
 
 .edit-form {
   padding: 0 4px;
+}
+
+/* 小字体文本列 */
+.table-small-text {
+  font-size: 12px;
+  color: #555;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 好友备注列：小字体、最多两行 */
+.table-chat-title {
+  font-size: 12px;
+  color: #666;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.4;
 }
 
 /* 表格问题摘要列：小字体、最多两行 */

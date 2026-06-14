@@ -356,6 +356,8 @@ async def query_quality_review_results(
                 QualityCheckResult.issue_summary,
                 QualityCheckResult.process_status,
                 QualityCheckResult.remark,
+                QualityCheckResult.enrollment_phone,
+                QualityCheckResult.chat_title,
             )
             .outerjoin(QualityCheckResult, QualityReviewResult.result_id == QualityCheckResult.id)
         )
@@ -406,6 +408,8 @@ async def query_quality_review_results(
             item["issue_summary"] = row[6]
             item["process_status"] = row[7]
             item["remark"] = row[8]
+            item["enrollment_phone"] = row[9]
+            item["chat_title"] = row[10]
             data.append(item)
 
         return {
@@ -454,6 +458,7 @@ async def get_quality_review_detail(
                 "alias": quality_record.alias,
                 "phone": quality_record.phone,
                 "remark_phone": quality_record.remark_phone,
+                "enrollment_phone": quality_record.enrollment_phone,
                 "detected_keywords": quality_record.detected_keywords,
                 "risk_category": quality_record.risk_category,
                 "trigger_party": quality_record.trigger_party,
