@@ -432,7 +432,7 @@ const columns = [
   { title: '销售姓名', dataIndex: 'user_name', key: 'user_name', width: 72 },
   { title: '好友昵称', dataIndex: 'friend_name', key: 'friend_name', width: 80 },
   { title: '报班手机号', dataIndex: 'enrollment_phone', key: 'enrollment_phone', width: 100 },
-  { title: '好友备注', key: 'chat_title', width: 120 },
+  { title: '好友备注', dataIndex: 'chat_title', key: 'chat_title', width: 120 },
   { title: '审查时间', dataIndex: 'completed_at', key: 'completed_at', width: 115, sorter: true },
   { title: '问题摘要', key: 'issue_summary', width: 200 },
   { title: '风险类型', key: 'risk_type', width: 85 },
